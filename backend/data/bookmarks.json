@@ -1,0 +1,62 @@
+[
+  {
+    "id": "f2e3f2f9-8f7a-4d7b-8c3e-53f1f6f7bc01",
+    "title": "Google 搜索",
+    "url": "https://www.google.com",
+    "category": "工具",
+    "description": "全球使用最广泛的搜索引擎。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:00:00.000Z",
+    "updatedAt": "2025-11-08T12:00:00.000Z"
+  },
+  {
+    "id": "4bb7d0a4-d418-4efc-9e5c-b0fa9f0acb1e",
+    "title": "GitHub",
+    "url": "https://github.com",
+    "category": "开发",
+    "description": "托管代码仓库与协作开发的首选平台。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:05:00.000Z",
+    "updatedAt": "2025-11-08T12:05:00.000Z"
+  },
+  {
+    "id": "a4b5c6d7-e8f9-4a0b-90c1-d2e3f4a5b6c7",
+    "title": "Stack Overflow",
+    "url": "https://stackoverflow.com",
+    "category": "开发",
+    "description": "程序员问答社区，解决技术问题的宝库。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:10:00.000Z",
+    "updatedAt": "2025-11-08T12:10:00.000Z"
+  },
+  {
+    "id": "d3c2b1a0-9f8e-7d6c-5b4a-3f2e1d0c9b8a",
+    "title": "MDN Web Docs",
+    "url": "https://developer.mozilla.org",
+    "category": "学习",
+    "description": "Mozilla 提供的 Web 标准与 API 权威文档。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:15:00.000Z",
+    "updatedAt": "2025-11-08T12:15:00.000Z"
+  },
+  {
+    "id": "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9",
+    "title": "Vercel",
+    "url": "https://vercel.com",
+    "category": "部署",
+    "description": "前端友好的 Serverless 部署平台。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:20:00.000Z",
+    "updatedAt": "2025-11-08T12:20:00.000Z"
+  },
+  {
+    "id": "12345678-90ab-cdef-1234-567890abcdef",
+    "title": "Railway",
+    "url": "https://railway.app",
+    "category": "部署",
+    "description": "快速托管 Node.js、数据库与服务的 PaaS 平台。",
+    "visible": true,
+    "createdAt": "2025-11-08T12:25:00.000Z",
+    "updatedAt": "2025-11-08T12:25:00.000Z"
+  }
+]
