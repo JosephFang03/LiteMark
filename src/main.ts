@@ -1,6 +1,7 @@
 /* eslint-disable node/no-unsupported-features/es-syntax */
 import { createApp } from 'vue';
 import App from './App.vue';
+import { router } from './router.js';
 import './style.css';
 
 const apiBaseFromEnv = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
@@ -10,5 +11,7 @@ if (typeof window !== 'undefined') {
 }
 /* eslint-enable node/no-unsupported-features/es-syntax */
 
-createApp(App).mount('#app');
+const app = createApp(App);
+app.use(router);
+app.mount('#app');
 

@@ -10,11 +10,12 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.678.0",
-    "ali-oss": "^6.20.0",
     "@vercel/blob": "^0.25.0",
+    "ali-oss": "^6.20.0",
+    "cos-nodejs-sdk-v5": "^2.15.4",
     "jsonwebtoken": "^9.0.2",
     "vue": "^3.5.12",
-    "cos-nodejs-sdk-v5": "^2.15.4",
+    "vue-router": "^4.6.3",
     "webdav": "^5.7.0"
   },
   "devDependencies": {
@@ -27,4 +28,3 @@
     "vite": "^5.4.8"
   }
 }
-
