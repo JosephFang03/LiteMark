@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import Sortable from 'sortablejs';
 
 type Bookmark = {
   id: string;
@@ -78,6 +79,122 @@ const currentUser = ref<string>(storedUser || '');
 const isAuthenticated = computed(() => Boolean(authToken.value));
 const showHidden = ref(false);
 const showForm = ref(false);
+const orderSaving = ref(false);
+
+const containerRefs = new Map<string, HTMLElement>();
+const sortableInstances = new Map<string, Sortable>();
+
+function setContainerRef(key: string, el: HTMLElement | null) {
+  if (!key) return;
+  if (el) {
+    containerRefs.set(key, el);
+  } else {
+    containerRefs.delete(key);
+  }
+}
+
+function destroySortables() {
+  sortableInstances.forEach((instance) => {
+    instance.destroy();
+  });
+  sortableInstances.clear();
+}
+
+async function persistOrder(newList: Bookmark[]) {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    throw new Error('请先登录');
+  }
+  orderSaving.value = true;
+  try {
+    const response = await requestWithAuth(`${endpoint}/reorder`, {
+      method: 'POST',
+      body: JSON.stringify({ order: newList.map((item) => item.id) })
+    });
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || '保存排序失败');
+    }
+    const updated = (await response.json()) as Bookmark[];
+    bookmarks.value = updated;
+  } finally {
+    orderSaving.value = false;
+  }
+}
+
+async function handleGroupReorder(groupKey: string, orderedIds: string[]) {
+  if (!isAuthenticated.value || orderedIds.length === 0) {
+    return;
+  }
+  const original = [...bookmarks.value];
+  const idToBookmark = new Map(original.map((item) => [item.id, item]));
+  const idSet = new Set(orderedIds);
+  const groupName = groupKey || '默认分类';
+  const newGroup: Bookmark[] = [];
+  orderedIds.forEach((id) => {
+    const bookmark = idToBookmark.get(id);
+    if (bookmark && normalizeCategory(bookmark) === groupName) {
+      newGroup.push(bookmark);
+      idToBookmark.delete(id);
+    }
+  });
+  original.forEach((bookmark) => {
+    if (normalizeCategory(bookmark) === groupName && !idSet.has(bookmark.id)) {
+      newGroup.push(bookmark);
+    }
+  });
+
+  const reordered: Bookmark[] = [];
+  let inserted = false;
+  original.forEach((bookmark) => {
+    if (normalizeCategory(bookmark) === groupName) {
+      if (!inserted) {
+        reordered.push(...newGroup);
+        inserted = true;
+      }
+    } else {
+      reordered.push(bookmark);
+    }
+  });
+
+  if (!inserted) {
+    return;
+  }
+
+  bookmarks.value = reordered;
+  try {
+    await persistOrder(reordered);
+  } catch (error: any) {
+    error.value = error instanceof Error ? error.message : '排序失败';
+    bookmarks.value = original;
+  }
+}
+
+function setupSortables() {
+  destroySortables();
+  if (!isAuthenticated.value || typeof window === 'undefined') {
+    return;
+  }
+  containerRefs.forEach((container, key) => {
+    const groupKey = container.dataset.group ?? '';
+    const sortable = new Sortable(container, {
+      animation: 150,
+      handle: '.card__drag-handle',
+      ghostClass: 'card--dragging',
+      onStart() {
+        orderSaving.value = true;
+      },
+      onEnd() {
+        orderSaving.value = false;
+        const ids = Array.from(container.querySelectorAll('[data-bookmark-id]')).map((el) =>
+          el.getAttribute('data-bookmark-id') ?? ''
+        );
+        handleGroupReorder(groupKey, ids);
+      }
+    });
+    sortableInstances.set(key, sortable);
+  });
+}
 
 const siteTitleDisplay = computed(() => {
   const value = siteTitle.value.trim();
@@ -555,6 +672,21 @@ onMounted(() => {
   });
 });
 
+watch([() => bookmarks.value, () => currentCategory.value, () => isAuthenticated.value], () => {
+  nextTick(() => {
+    if (isAuthenticated.value) {
+      setupSortables();
+    } else {
+      destroySortables();
+    }
+  });
+});
+
+onBeforeUnmount(() => {
+  destroySortables();
+  containerRefs.clear();
+});
+
 async function toggleVisibility(bookmark: Bookmark) {
   if (!isAuthenticated.value) {
     showLoginModal.value = true;
@@ -763,14 +895,27 @@ function openBookmark(bookmark: Bookmark) {
             </div>
             <span class="category-badge">{{ group.count }}</span>
           </header>
-          <div class="card-grid">
+          <div
+            class="card-grid"
+            :ref="(el) => setContainerRef(group.name, el)"
+            :data-group="group.name"
+          >
             <article
               v-for="bookmark in group.bookmarks"
               :key="bookmark.id"
               :class="['card', { 'card--hidden': bookmark.visible === false }]"
+              :data-bookmark-id="bookmark.id"
               @click="openBookmark(bookmark)"
             >
               <header class="card__header">
+                <span
+                  v-if="isAuthenticated"
+                  class="card__drag-handle"
+                  title="拖动调整顺序"
+                  @click.stop
+                >
+                  ⠿
+                </span>
                 <h3 class="card__title">
                   <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
                 </h3>
@@ -805,14 +950,27 @@ function openBookmark(bookmark: Bookmark) {
           </div>
           <span class="category-badge">{{ categoryFiltered.length }}</span>
         </header>
-        <div class="card-grid">
+        <div
+          class="card-grid"
+          :ref="(el) => setContainerRef(currentCategory, el)"
+          :data-group="currentCategory"
+        >
           <article
             v-for="bookmark in categoryFiltered"
             :key="bookmark.id"
             :class="['card', { 'card--hidden': bookmark.visible === false }]"
+            :data-bookmark-id="bookmark.id"
             @click="openBookmark(bookmark)"
           >
             <header class="card__header">
+              <span
+                v-if="isAuthenticated"
+                class="card__drag-handle"
+                title="拖动调整顺序"
+                @click.stop
+              >
+                ⠿
+              </span>
               <h3 class="card__title">
                 <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
               </h3>
@@ -1684,6 +1842,20 @@ function openBookmark(bookmark: Bookmark) {
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
+}
+
+.card__drag-handle {
+  cursor: grab;
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+.card__drag-handle:active {
+  cursor: grabbing;
+}
+
+.card--dragging {
+  opacity: 0.6;
 }
 
 @media (max-width: 768px) {
