@@ -135,8 +135,7 @@ async function writeWebdavJson(key: string, data: unknown) {
   const client = ensureWebdavClient();
   const body = JSON.stringify(data, null, 2);
   await client.putFileContents(key, body, {
-    overwrite: true,
-    contentType: 'application/json'
+    overwrite: true
   });
 }
 

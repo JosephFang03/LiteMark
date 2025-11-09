@@ -1,3 +1,4 @@
+.npm
 node_modules
 .vercel
 npm-debug.log*
@@ -8,4 +9,3 @@ dist
 .env.local
 *.log
 .DS_Store
-
