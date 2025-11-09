@@ -48,7 +48,7 @@ async function readBlobJson<T>(key: string, fallback: T): Promise<T> {
 async function writeBlobJson(key: string, data: unknown) {
   const body = JSON.stringify(data, null, 2);
   await put(key, body, {
-    access: 'private',
+    access: 'public',
     contentType: 'application/json'
   });
 }
