@@ -22,6 +22,14 @@ type BookmarkInput = {
 
 type SettingsData = {
   theme: string;
+  siteTitle: string;
+  siteIcon: string;
+};
+
+const DEFAULT_SETTINGS: SettingsData = {
+  theme: 'light',
+  siteTitle: '个人书签',
+  siteIcon: '🔖'
 };
 
 async function loadBookmarks(): Promise<BookmarkRecord[]> {
@@ -33,11 +41,28 @@ async function saveBookmarks(bookmarks: BookmarkRecord[]) {
 }
 
 async function loadSettings(): Promise<SettingsData> {
-  return readJson('settings', { theme: 'light' });
+  return readJson('settings', DEFAULT_SETTINGS);
 }
 
 async function saveSettings(settings: SettingsData) {
   await writeJson('settings', settings);
+}
+
+export async function getSettings(): Promise<SettingsData> {
+  return loadSettings();
+}
+
+export async function updateSettings(partial: Partial<SettingsData>): Promise<SettingsData> {
+  const current = await loadSettings();
+  const next: SettingsData = {
+    ...current,
+    ...partial,
+    theme: partial.theme ?? current.theme,
+    siteTitle: partial.siteTitle ?? current.siteTitle,
+    siteIcon: partial.siteIcon ?? current.siteIcon
+  };
+  await saveSettings(next);
+  return next;
 }
 
 export async function listBookmarks(): Promise<BookmarkRecord[]> {
@@ -95,17 +120,5 @@ export async function deleteBookmark(id: string): Promise<BookmarkRecord | null>
   const [removed] = bookmarks.splice(index, 1);
   await saveBookmarks(bookmarks);
   return removed;
-}
-
-export async function getTheme(): Promise<string> {
-  const settings = await loadSettings();
-  return settings.theme;
-}
-
-export async function setTheme(theme: string): Promise<string> {
-  const settings = await loadSettings();
-  settings.theme = theme;
-  await saveSettings(settings);
-  return settings.theme;
 }
 

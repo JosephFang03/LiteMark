@@ -18,13 +18,23 @@ type CategoryOption = {
   count: number;
 };
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+const apiBaseRaw =
+  (typeof window !== 'undefined'
+    ? (window as { __APP_API_BASE_URL__?: string }).__APP_API_BASE_URL__
+    : '') ?? '';
+const apiBase = apiBaseRaw.replace(/\/$/, '');
 const endpoint = `${apiBase}/api/bookmarks`;
+
+const DEFAULT_TITLE = '个人书签';
+const DEFAULT_ICON = '🔖';
 
 const themeOptions = [
   { value: 'light', label: '晨光浅色' },
   { value: 'twilight', label: '暮色渐变' },
-  { value: 'dark', label: '夜空深色' }
+  { value: 'dark', label: '夜空深色' },
+  { value: 'forest', label: '林间绿意' },
+  { value: 'ocean', label: '深海幻境' },
+  { value: 'sunrise', label: '朝霞暖橙' }
 ];
 
 const bookmarks = ref<Bookmark[]>([]);
@@ -40,6 +50,16 @@ const selectedTheme = ref<string>(themeOptions[0].value);
 const themeSaving = ref(false);
 const themeMessage = ref('');
 const settingsLoaded = ref(false);
+
+const siteTitle = ref<string>(DEFAULT_TITLE);
+const siteIcon = ref<string>(DEFAULT_ICON);
+const siteSettingsForm = reactive({
+  title: DEFAULT_TITLE,
+  icon: DEFAULT_ICON
+});
+const siteSettingsSaving = ref(false);
+const siteSettingsMessage = ref('');
+const siteSettingsError = ref('');
 
 const form = reactive({
   title: '',
@@ -66,6 +86,18 @@ const currentUser = ref<string>(storedUser || '');
 const isAuthenticated = computed(() => Boolean(authToken.value));
 const showHidden = ref(false);
 const showForm = ref(false);
+
+const siteTitleDisplay = computed(() => {
+  const value = siteTitle.value.trim();
+  return value || DEFAULT_TITLE;
+});
+
+const siteIconDisplay = computed(() => {
+  const value = siteIcon.value.trim();
+  return value || DEFAULT_ICON;
+});
+
+const siteIconIsImage = computed(() => /^(https?:|data:|\/)/i.test(siteIconDisplay.value));
 
 watch(authToken, (token) => {
   if (typeof window === 'undefined') return;
@@ -95,6 +127,75 @@ watch(isAuthenticated, (authed) => {
 function applyTheme(theme: string) {
   if (typeof document === 'undefined') return;
   document.documentElement.setAttribute('data-theme', theme);
+}
+
+let defaultFaviconHref: string | null = null;
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveFaviconHref(icon: string): string | null {
+  const value = icon.trim();
+  if (!value) {
+    return null;
+  }
+  if (/^(https?:|data:|\/)/i.test(value)) {
+    return value;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" font-size="48">${escapeXml(value)}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+function updateFavicon(icon: string) {
+  if (typeof document === 'undefined') return;
+  let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  if (defaultFaviconHref === null) {
+    defaultFaviconHref = link.href || '';
+  }
+  const href = resolveFaviconHref(icon);
+  if (href) {
+    link.href = href;
+    if (href.startsWith('data:image/svg+xml')) {
+      link.type = 'image/svg+xml';
+    } else {
+      link.removeAttribute('type');
+    }
+  } else if (defaultFaviconHref) {
+    link.href = defaultFaviconHref;
+  } else {
+    link.remove();
+  }
+}
+
+function applySiteMeta(title: string, icon: string) {
+  if (typeof document === 'undefined') return;
+  const resolvedTitle = title.trim() || DEFAULT_TITLE;
+  const resolvedIcon = icon.trim() || DEFAULT_ICON;
+  document.title = resolvedTitle;
+  updateFavicon(resolvedIcon);
+}
+
+function resetSiteSettingsForm() {
+  siteSettingsForm.title = siteTitle.value;
+  siteSettingsForm.icon = siteIcon.value;
+  siteSettingsMessage.value = '';
+  siteSettingsError.value = '';
+}
+
+function handleSiteSettingsInput() {
+  siteSettingsMessage.value = '';
+  siteSettingsError.value = '';
 }
 
 watch(currentTheme, (value) => {
@@ -224,15 +325,26 @@ async function loadSettings() {
     if (!response.ok) {
       throw new Error(await response.text());
     }
-    const settings = (await response.json()) as { theme?: string };
+    const settings = (await response.json()) as {
+      theme?: string;
+      siteTitle?: string;
+      siteIcon?: string;
+    };
     if (settings.theme && themeOptions.some((item) => item.value === settings.theme)) {
       currentTheme.value = settings.theme;
       selectedTheme.value = settings.theme;
     }
+    siteTitle.value = settings.siteTitle ?? DEFAULT_TITLE;
+    siteIcon.value = settings.siteIcon ?? DEFAULT_ICON;
+    applySiteMeta(siteTitle.value, siteIcon.value);
+    resetSiteSettingsForm();
     settingsLoaded.value = true;
     themeMessage.value = '';
+    siteSettingsMessage.value = '';
+    siteSettingsError.value = '';
   } catch (err) {
     themeMessage.value = err instanceof Error ? err.message : '加载主题配置失败';
+    siteSettingsError.value = err instanceof Error ? err.message : '加载站点设置失败';
   }
 }
 
@@ -364,7 +476,7 @@ async function handleThemeChange() {
   themeMessage.value = '';
   const previous = currentTheme.value;
   try {
-    const response = await requestWithAuth(`${apiBase}/api/settings/theme`, {
+    const response = await requestWithAuth(`${apiBase}/api/settings`, {
       method: 'PUT',
       body: JSON.stringify({ theme: value })
     });
@@ -372,14 +484,62 @@ async function handleThemeChange() {
       const message = await response.text();
       throw new Error(message || '保存主题失败');
     }
-    const result = (await response.json()) as { theme: string };
+    const result = (await response.json()) as { theme: string; siteTitle?: string; siteIcon?: string };
     currentTheme.value = result.theme;
     selectedTheme.value = result.theme;
+    if (result.siteTitle !== undefined) {
+      siteTitle.value = result.siteTitle || DEFAULT_TITLE;
+    }
+    if (result.siteIcon !== undefined) {
+      siteIcon.value = result.siteIcon || DEFAULT_ICON;
+    }
   } catch (err) {
     themeMessage.value = err instanceof Error ? err.message : '保存主题失败';
     selectedTheme.value = previous;
   } finally {
     themeSaving.value = false;
+  }
+}
+
+async function saveSiteSettings() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+  const payload = {
+    siteTitle: siteSettingsForm.title.trim(),
+    siteIcon: siteSettingsForm.icon.trim()
+  };
+  if (!payload.siteTitle) {
+    siteSettingsError.value = '站点标题不能为空';
+    return;
+  }
+  siteSettingsSaving.value = true;
+  siteSettingsMessage.value = '';
+  siteSettingsError.value = '';
+  try {
+    const response = await requestWithAuth(`${apiBase}/api/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || '保存站点设置失败');
+    }
+    const result = (await response.json()) as {
+      siteTitle: string;
+      siteIcon: string;
+      theme: string;
+    };
+    siteTitle.value = result.siteTitle ?? DEFAULT_TITLE;
+    siteIcon.value = result.siteIcon ?? DEFAULT_ICON;
+    applySiteMeta(siteTitle.value, siteIcon.value);
+    resetSiteSettingsForm();
+    siteSettingsMessage.value = '站点信息已保存';
+  } catch (err) {
+    siteSettingsError.value = err instanceof Error ? err.message : '保存站点设置失败';
+  } finally {
+    siteSettingsSaving.value = false;
   }
 }
 
@@ -493,8 +653,11 @@ function openBookmark(bookmark: Bookmark) {
   <div class="layout">
     <header class="topbar">
       <div class="brand">
-        <span class="brand__icon">🔖</span>
-        <h1>个人书签</h1>
+        <span v-if="!siteIconIsImage" class="brand__icon">{{ siteIconDisplay }}</span>
+        <span v-else class="brand__icon brand__icon--image">
+          <img :src="siteIconDisplay" alt="站点图标" />
+        </span>
+        <h1>{{ siteTitleDisplay }}</h1>
       </div>
       <div class="topbar__actions">
         <div class="theme-switcher">
@@ -565,6 +728,54 @@ function openBookmark(bookmark: Bookmark) {
       </nav>
 
       <p v-if="themeMessage" class="alert alert--error">{{ themeMessage }}</p>
+      <p v-if="siteSettingsError && !isAuthenticated" class="alert alert--error">{{ siteSettingsError }}</p>
+
+      <section v-if="isAuthenticated" class="form-card">
+        <header class="form-card__header">
+          <h2>站点设置</h2>
+          <span>配置网站标题与浏览器图标</span>
+        </header>
+        <form @submit.prevent="saveSiteSettings">
+          <div class="form-grid">
+            <label class="field">
+              <span>网站标题 *</span>
+              <input
+                v-model="siteSettingsForm.title"
+                type="text"
+                placeholder="例如：我的书签收藏"
+                maxlength="60"
+                required
+                @input="handleSiteSettingsInput"
+              />
+            </label>
+            <label class="field">
+              <span>网站图标</span>
+              <input
+                v-model="siteSettingsForm.icon"
+                type="text"
+                placeholder="支持 Emoji 或图标链接"
+                maxlength="512"
+                @input="handleSiteSettingsInput"
+              />
+            </label>
+          </div>
+          <p v-if="siteSettingsError" class="alert alert--error">{{ siteSettingsError }}</p>
+          <p v-else-if="siteSettingsMessage" class="alert alert--success">{{ siteSettingsMessage }}</p>
+          <div class="form-actions">
+            <button class="button button--primary" type="submit" :disabled="siteSettingsSaving">
+              {{ siteSettingsSaving ? '保存中...' : '保存站点信息' }}
+            </button>
+            <button
+              class="button button--ghost"
+              type="button"
+              @click="resetSiteSettingsForm"
+              :disabled="siteSettingsSaving"
+            >
+              恢复当前设置
+            </button>
+          </div>
+        </form>
+      </section>
 
       <section v-if="isAuthenticated && showForm" class="form-card">
         <header class="form-card__header">
@@ -871,6 +1082,138 @@ function openBookmark(bookmark: Bookmark) {
   --input-shadow-focus: rgba(99, 102, 241, 0.2);
 }
 
+::global(:root[data-theme='forest']) {
+  --bg-gradient-start: #ecfdf5;
+  --bg-gradient-end: #d1fae5;
+  --text-primary: #14532d;
+  --text-secondary: #166534;
+  --text-muted: #4d7c55;
+  --surface-glass: rgba(255, 255, 255, 0.9);
+  --surface-strong: rgba(236, 253, 245, 0.95);
+  --surface-soft: rgba(236, 253, 245, 0.85);
+  --surface-card: rgba(209, 250, 229, 0.85);
+  --surface-border: rgba(34, 197, 94, 0.12);
+  --surface-shadow: rgba(22, 163, 74, 0.18);
+  --shadow-strong: rgba(16, 185, 129, 0.22);
+  --search-bg: rgba(187, 247, 208, 0.72);
+  --accent-start: #16a34a;
+  --accent-end: #10b981;
+  --accent-text: #0d9488;
+  --accent-shadow: rgba(5, 150, 105, 0.26);
+  --ghost-bg: rgba(255, 255, 255, 0.8);
+  --ghost-border: rgba(16, 185, 129, 0.2);
+  --ghost-text: #047857;
+  --danger-bg: rgba(248, 113, 113, 0.18);
+  --danger-border: rgba(220, 38, 38, 0.24);
+  --danger-text: #dc2626;
+  --tag-bg: rgba(16, 185, 129, 0.16);
+  --tag-text: #0f766e;
+  --badge-bg: rgba(22, 163, 74, 0.16);
+  --badge-text: #0f5132;
+  --tab-bg: rgba(236, 253, 245, 0.8);
+  --tab-text: #047857;
+  --tab-active-bg-start: #16a34a;
+  --tab-active-bg-end: #0d9488;
+  --tab-active-text: #ffffff;
+  --tab-badge-bg: rgba(255, 255, 255, 0.36);
+  --alert-error-bg: rgba(254, 226, 226, 0.92);
+  --alert-error-text: #b91c1c;
+  --overlay-bg: rgba(15, 118, 110, 0.45);
+  --dialog-bg: rgba(255, 255, 255, 0.96);
+  --input-bg: rgba(236, 253, 245, 0.92);
+  --input-border: transparent;
+  --input-border-focus: rgba(16, 185, 129, 0.32);
+  --input-shadow-focus: rgba(16, 185, 129, 0.18);
+}
+
+::global(:root[data-theme='ocean']) {
+  --bg-gradient-start: #e0f2fe;
+  --bg-gradient-end: #c7d2fe;
+  --text-primary: #0f172a;
+  --text-secondary: #1d4ed8;
+  --text-muted: #3b82f6;
+  --surface-glass: rgba(240, 249, 255, 0.92);
+  --surface-strong: rgba(224, 242, 254, 0.95);
+  --surface-soft: rgba(224, 231, 255, 0.88);
+  --surface-card: rgba(219, 234, 254, 0.9);
+  --surface-border: rgba(14, 165, 233, 0.16);
+  --surface-shadow: rgba(37, 99, 235, 0.24);
+  --shadow-strong: rgba(59, 130, 246, 0.28);
+  --search-bg: rgba(191, 219, 254, 0.72);
+  --accent-start: #0ea5e9;
+  --accent-end: #6366f1;
+  --accent-text: #1e3a8a;
+  --accent-shadow: rgba(14, 165, 233, 0.32);
+  --ghost-bg: rgba(255, 255, 255, 0.85);
+  --ghost-border: rgba(59, 130, 246, 0.18);
+  --ghost-text: #1e3a8a;
+  --danger-bg: rgba(248, 113, 113, 0.2);
+  --danger-border: rgba(220, 38, 38, 0.3);
+  --danger-text: #b91c1c;
+  --tag-bg: rgba(14, 165, 233, 0.2);
+  --tag-text: #2563eb;
+  --badge-bg: rgba(59, 130, 246, 0.2);
+  --badge-text: #1e40af;
+  --tab-bg: rgba(224, 242, 254, 0.85);
+  --tab-text: #1e3a8a;
+  --tab-active-bg-start: #0ea5e9;
+  --tab-active-bg-end: #6366f1;
+  --tab-active-text: #ffffff;
+  --tab-badge-bg: rgba(255, 255, 255, 0.35);
+  --alert-error-bg: rgba(254, 226, 226, 0.92);
+  --alert-error-text: #b91c1c;
+  --overlay-bg: rgba(12, 74, 110, 0.45);
+  --dialog-bg: rgba(255, 255, 255, 0.96);
+  --input-bg: rgba(224, 242, 254, 0.92);
+  --input-border: transparent;
+  --input-border-focus: rgba(14, 165, 233, 0.32);
+  --input-shadow-focus: rgba(59, 130, 246, 0.2);
+}
+
+::global(:root[data-theme='sunrise']) {
+  --bg-gradient-start: #fff7ed;
+  --bg-gradient-end: #ffe4e6;
+  --text-primary: #7c2d12;
+  --text-secondary: #9d174d;
+  --text-muted: #be123c;
+  --surface-glass: rgba(255, 247, 237, 0.92);
+  --surface-strong: rgba(255, 237, 213, 0.95);
+  --surface-soft: rgba(255, 247, 237, 0.88);
+  --surface-card: rgba(255, 228, 230, 0.9);
+  --surface-border: rgba(244, 114, 182, 0.16);
+  --surface-shadow: rgba(251, 146, 60, 0.24);
+  --shadow-strong: rgba(236, 72, 153, 0.28);
+  --search-bg: rgba(254, 215, 170, 0.72);
+  --accent-start: #fb923c;
+  --accent-end: #ec4899;
+  --accent-text: #c2410c;
+  --accent-shadow: rgba(244, 114, 182, 0.34);
+  --ghost-bg: rgba(255, 255, 255, 0.85);
+  --ghost-border: rgba(251, 146, 60, 0.22);
+  --ghost-text: #b91c1c;
+  --danger-bg: rgba(248, 113, 113, 0.22);
+  --danger-border: rgba(220, 38, 38, 0.3);
+  --danger-text: #b91c1c;
+  --tag-bg: rgba(251, 146, 60, 0.2);
+  --tag-text: #c2410c;
+  --badge-bg: rgba(236, 72, 153, 0.2);
+  --badge-text: #9d174d;
+  --tab-bg: rgba(255, 255, 255, 0.85);
+  --tab-text: #be123c;
+  --tab-active-bg-start: #fb923c;
+  --tab-active-bg-end: #ec4899;
+  --tab-active-text: #ffffff;
+  --tab-badge-bg: rgba(255, 255, 255, 0.4);
+  --alert-error-bg: rgba(254, 226, 226, 0.92);
+  --alert-error-text: #b91c1c;
+  --overlay-bg: rgba(136, 19, 55, 0.48);
+  --dialog-bg: rgba(255, 255, 255, 0.96);
+  --input-bg: rgba(255, 247, 237, 0.92);
+  --input-border: transparent;
+  --input-border-focus: rgba(251, 146, 60, 0.32);
+  --input-shadow-focus: rgba(236, 72, 153, 0.2);
+}
+
 .layout {
   min-height: 100vh;
   background: linear-gradient(180deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
@@ -900,6 +1243,14 @@ function openBookmark(bookmark: Bookmark) {
 
 .brand__icon {
   font-size: 26px;
+}
+
+.brand__icon--image img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
 }
 
 .brand h1 {
@@ -1217,6 +1568,11 @@ function openBookmark(bookmark: Bookmark) {
   color: var(--alert-error-text);
 }
 
+.alert--success {
+  background: rgba(220, 252, 231, 0.92);
+  color: #15803d;
+}
+
 .empty {
   text-align: center;
   color: var(--text-muted);
@@ -1417,6 +1773,31 @@ function openBookmark(bookmark: Bookmark) {
     padding: 16px 20px;
   }
 
+  .topbar__actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .theme-switcher {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .category-tabs {
+    overflow-x: auto;
+    gap: 10px;
+    padding-bottom: 6px;
+  }
+
+  .category-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+  }
+
   .main {
     padding: 0 16px 48px;
   }
@@ -1428,8 +1809,97 @@ function openBookmark(bookmark: Bookmark) {
     border-radius: 20px;
   }
 
+  .search-input {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .search-input button {
+    width: 100%;
+  }
+
   .card-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .brand {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .topbar__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .theme-switcher {
+    align-items: stretch;
+  }
+
+  .theme-switcher label {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .hidden-toggle {
+    justify-content: space-between;
+  }
+
+  .profile {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .search-input {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input input {
+    width: 100%;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-actions .button,
+  .topbar__actions .button,
+  .card__buttons .button {
+    width: 100%;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card__buttons {
+    flex-wrap: wrap;
+  }
+
+  .card__buttons .button {
+    flex: 1 1 48%;
+  }
+
+  .category-tabs {
+    gap: 8px;
+  }
+
+  .tab {
+    padding: 10px 16px;
   }
 }
 
