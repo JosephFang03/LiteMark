@@ -9,3 +9,4 @@ pnpm-debug.log*
 dist
 *.log
 .DS_Store
+.env.local

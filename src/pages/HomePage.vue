@@ -80,6 +80,19 @@ const showForm = ref(false);
 const orderSaving = ref(false);
 const pendingOrder = ref<string[] | null>(null);
 const orderMessage = ref('');
+const actionMessage = ref('');
+let actionMessageTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showActionMessage(message: string) {
+  actionMessage.value = message;
+  if (actionMessageTimer) {
+    clearTimeout(actionMessageTimer);
+  }
+  actionMessageTimer = setTimeout(() => {
+    actionMessage.value = '';
+    actionMessageTimer = null;
+  }, 3000);
+}
 
 function toUserMessage(err: unknown, fallback: string) {
   if (err instanceof Error) {
@@ -564,6 +577,7 @@ async function saveBookmark() {
       throw new Error(message || '保存失败');
     }
     await loadBookmarks();
+    showActionMessage(editingId.value ? '书签已更新' : '书签已添加');
     resetForm();
   } catch (err) {
     error.value = toUserMessage(err, '保存失败');
@@ -598,6 +612,7 @@ async function removeBookmark(id: string) {
       throw new Error(message || '删除失败');
     }
     await loadBookmarks();
+    showActionMessage('书签已删除');
   } catch (err) {
     error.value = toUserMessage(err, '删除失败');
   }
@@ -737,6 +752,9 @@ async function toggleVisibility(bookmark: Bookmark) {
       throw new Error(message || '更新显示状态失败');
     }
     await loadBookmarks();
+    showActionMessage(
+      bookmark.visible === false ? '书签已设为可见' : '书签已隐藏'
+    );
   } catch (err) {
     error.value = toUserMessage(err, '更新显示状态失败');
   }
@@ -854,6 +872,7 @@ function openBookmark(bookmark: Bookmark) {
 
       <p v-if="themeMessage" class="alert alert--error">{{ themeMessage }}</p>
       <p v-if="orderMessage" class="alert alert--success">{{ orderMessage }}</p>
+      <p v-if="actionMessage" class="alert alert--success">{{ actionMessage }}</p>
       <section v-if="isAuthenticated && showForm" class="form-card">
         <header class="form-card__header">
           <h2>{{ editingId ? '编辑书签' : '新增书签' }}</h2>
