@@ -8,7 +8,6 @@ type Bookmark = {
   url: string;
   category?: string;
   description?: string;
-  weight?: number;
   visible?: boolean;
 };
 
@@ -81,6 +80,19 @@ const showForm = ref(false);
 const orderSaving = ref(false);
 const pendingOrder = ref<string[] | null>(null);
 const orderMessage = ref('');
+const actionMessage = ref('');
+let actionMessageTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showActionMessage(message: string) {
+  actionMessage.value = message;
+  if (actionMessageTimer) {
+    clearTimeout(actionMessageTimer);
+  }
+  actionMessageTimer = setTimeout(() => {
+    actionMessage.value = '';
+    actionMessageTimer = null;
+  }, 3000);
+}
 
 function toUserMessage(err: unknown, fallback: string) {
   if (err instanceof Error) {
@@ -95,13 +107,22 @@ function toUserMessage(err: unknown, fallback: string) {
 
 const containerRefs = new Map<string, HTMLElement>();
 const sortableInstances = new Map<string, Sortable>();
+const DEFAULT_CONTAINER_KEY = '__default__';
+
+function encodeGroupKey(key: string): string {
+  return key === '' ? DEFAULT_CONTAINER_KEY : key;
+}
+
+function decodeGroupKey(key: string): string {
+  return key === DEFAULT_CONTAINER_KEY ? '' : key;
+}
 
 function setContainerRef(key: string, el: HTMLElement | null) {
-  if (!key) return;
+  const encoded = encodeGroupKey(key);
   if (el) {
-    containerRefs.set(key, el);
+    containerRefs.set(encoded, el);
   } else {
-    containerRefs.delete(key);
+    containerRefs.delete(encoded);
   }
 }
 
@@ -146,17 +167,17 @@ async function handleGroupReorder(groupKey: string, orderedIds: string[]) {
   const original = [...bookmarks.value];
   const idToBookmark = new Map(original.map((item) => [item.id, item]));
   const idSet = new Set(orderedIds);
-  const groupName = groupKey || '默认分类';
+  const targetKey = groupKey;
   const newGroup: Bookmark[] = [];
   orderedIds.forEach((id) => {
     const bookmark = idToBookmark.get(id);
-    if (bookmark && normalizeCategory(bookmark) === groupName) {
+    if (bookmark && categoryKeyFromBookmark(bookmark) === targetKey) {
       newGroup.push(bookmark);
       idToBookmark.delete(id);
     }
   });
   original.forEach((bookmark) => {
-    if (normalizeCategory(bookmark) === groupName && !idSet.has(bookmark.id)) {
+    if (categoryKeyFromBookmark(bookmark) === targetKey && !idSet.has(bookmark.id)) {
       newGroup.push(bookmark);
     }
   });
@@ -164,7 +185,7 @@ async function handleGroupReorder(groupKey: string, orderedIds: string[]) {
   const reordered: Bookmark[] = [];
   let inserted = false;
   original.forEach((bookmark) => {
-    if (normalizeCategory(bookmark) === groupName) {
+    if (categoryKeyFromBookmark(bookmark) === targetKey) {
       if (!inserted) {
         reordered.push(...newGroup);
         inserted = true;
@@ -188,8 +209,8 @@ function setupSortables() {
   if (!isAuthenticated.value || typeof window === 'undefined') {
     return;
   }
-  containerRefs.forEach((container, key) => {
-    const groupKey = container.dataset.group ?? '';
+  containerRefs.forEach((container, encodedKey) => {
+    const groupKey = decodeGroupKey(encodedKey);
     const sortable = new Sortable(container, {
       animation: 150,
       handle: '.card__drag-handle',
@@ -204,7 +225,7 @@ function setupSortables() {
         handleGroupReorder(groupKey, ids);
       }
     });
-    sortableInstances.set(key, sortable);
+    sortableInstances.set(encodedKey, sortable);
   });
 }
 
@@ -315,28 +336,29 @@ watch(currentTheme, (value) => {
   applyTheme(value);
 });
 
+function categoryKeyFromBookmark(bookmark: Bookmark): string {
+  return bookmark.category?.trim() ?? '';
+}
+
+function categoryLabelFromKey(key: string): string {
+  return key || '默认分类';
+}
+
 function normalizeCategory(bookmark: Bookmark) {
-  return bookmark.category?.trim() || '默认分类';
+  return categoryLabelFromKey(categoryKeyFromBookmark(bookmark));
 }
 
 const keywordFiltered = computed(() => {
   const keyword = search.value.trim().toLowerCase();
   if (!keyword) {
-    return [...bookmarks.value].sort((a, b) => (a.weight ?? 0) - (b.weight ?? 0));
+    return [...bookmarks.value];
   }
-  return bookmarks.value
-    .filter((item) => {
-      const haystack = [
-        item.title,
-        item.url,
-        item.category ?? '',
-        item.description ?? ''
-      ]
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(keyword);
-    })
-    .sort((a, b) => (a.weight ?? 0) - (b.weight ?? 0));
+  return bookmarks.value.filter((item) => {
+    const haystack = [item.title, item.url, item.category ?? '', item.description ?? '']
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(keyword);
+  });
 });
 
 const visibilityFiltered = computed(() => {
@@ -348,10 +370,15 @@ const visibilityFiltered = computed(() => {
 });
 
 const categories = computed<CategoryOption[]>(() => {
-  const map = new Map<string, number>();
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+
   visibilityFiltered.value.forEach((bookmark) => {
-    const key = normalizeCategory(bookmark);
-    map.set(key, (map.get(key) ?? 0) + 1);
+    const key = categoryKeyFromBookmark(bookmark);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!order.includes(key)) {
+      order.push(key);
+    }
   });
 
   const options: CategoryOption[] = [
@@ -362,38 +389,41 @@ const categories = computed<CategoryOption[]>(() => {
     }
   ];
 
-  Array.from(map.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hans-CN'))
-    .forEach(([label, count]) => {
-      options.push({
-        key: label,
-        label,
-        count
-      });
+  order.forEach((key) => {
+    options.push({
+      key,
+      label: categoryLabelFromKey(key),
+      count: counts.get(key) ?? 0
     });
+  });
 
   return options;
 });
 
 const groupedBookmarks = computed(() => {
   const groups = new Map<string, Bookmark[]>();
+  const order: string[] = [];
+
   visibilityFiltered.value.forEach((bookmark) => {
-    const groupKey = normalizeCategory(bookmark);
-    const group = groups.get(groupKey);
-    if (group) {
-      group.push(bookmark);
+    const key = categoryKeyFromBookmark(bookmark);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(bookmark);
     } else {
-      groups.set(groupKey, [bookmark]);
+      groups.set(key, [bookmark]);
+      order.push(key);
     }
   });
 
-  return Array.from(groups.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hans-CN'))
-    .map(([name, list]) => ({
-      name,
+  return order.map((key) => {
+    const list = groups.get(key) ?? [];
+    return {
+      key,
+      name: categoryLabelFromKey(key),
       count: list.length,
       bookmarks: list
-    }));
+    };
+  });
 });
 
 const categorySuggestions = computed(() => {
@@ -414,7 +444,7 @@ const categoryFiltered = computed(() => {
     return visibilityFiltered.value;
   }
   return visibilityFiltered.value.filter(
-    (bookmark) => normalizeCategory(bookmark) === currentCategory.value
+    (bookmark) => categoryKeyFromBookmark(bookmark) === currentCategory.value
   );
 });
 
@@ -423,7 +453,7 @@ watch(bookmarks, () => {
     return;
   }
   const hasCategory = visibilityFiltered.value.some(
-    (bookmark) => normalizeCategory(bookmark) === currentCategory.value
+    (bookmark) => categoryKeyFromBookmark(bookmark) === currentCategory.value
   );
   if (!hasCategory) {
     currentCategory.value = 'all';
@@ -547,6 +577,7 @@ async function saveBookmark() {
       throw new Error(message || '保存失败');
     }
     await loadBookmarks();
+    showActionMessage(editingId.value ? '书签已更新' : '书签已添加');
     resetForm();
   } catch (err) {
     error.value = toUserMessage(err, '保存失败');
@@ -581,6 +612,7 @@ async function removeBookmark(id: string) {
       throw new Error(message || '删除失败');
     }
     await loadBookmarks();
+    showActionMessage('书签已删除');
   } catch (err) {
     error.value = toUserMessage(err, '删除失败');
   }
@@ -720,6 +752,9 @@ async function toggleVisibility(bookmark: Bookmark) {
       throw new Error(message || '更新显示状态失败');
     }
     await loadBookmarks();
+    showActionMessage(
+      bookmark.visible === false ? '书签已设为可见' : '书签已隐藏'
+    );
   } catch (err) {
     error.value = toUserMessage(err, '更新显示状态失败');
   }
@@ -755,17 +790,17 @@ function openBookmark(bookmark: Bookmark) {
           <img :src="siteIconDisplay" alt="站点图标" />
         </span>
         <h1>{{ siteTitleDisplay }}</h1>
+        <div class="brand__search">
+          <span class="search-input__icon">🔍</span>
+          <input
+            v-model="search"
+            type="search"
+            placeholder="搜索书签..."
+            @keydown.enter.prevent="loadBookmarks"
+          />
+        </div>
       </div>
       <div class="topbar__actions">
-        <button
-          v-if="isAuthenticated"
-          class="button button--ghost"
-          type="button"
-          :disabled="loading"
-          @click="loadBookmarks"
-        >
-          {{ loading ? '加载中...' : '刷新数据' }}
-        </button>
         <div v-if="isAuthenticated" class="theme-switcher">
           <label>
             <span>主题</span>
@@ -783,7 +818,7 @@ function openBookmark(bookmark: Bookmark) {
         </div>
         <button
           v-if="isAuthenticated"
-          class="button button--primary"
+          class="button button--primary save-button"
           type="button"
           :disabled="orderSaving || !pendingOrder"
           @click="() => pendingOrder && persistOrder(pendingOrder)"
@@ -802,7 +837,7 @@ function openBookmark(bookmark: Bookmark) {
           <input type="checkbox" v-model="showHidden" />
           显示隐藏书签
         </label>
-        <button v-if="!isAuthenticated" class="button button--ghost" @click="openLogin">
+        <button v-if="!isAuthenticated" class="button button--ghost login-button" @click="openLogin">
           登录
         </button>
         <div v-else class="profile">
@@ -813,18 +848,6 @@ function openBookmark(bookmark: Bookmark) {
     </header>
 
     <main class="main">
-      <section class="search-card">
-        <div class="search-input">
-          <span class="search-input__icon">🔍</span>
-          <input
-            v-model="search"
-            type="search"
-            placeholder="搜索书签..."
-            @keydown.enter.prevent="loadBookmarks"
-          />
-        </div>
-      </section>
-
       <nav class="category-tabs">
         <button
           v-for="item in categories"
@@ -840,6 +863,7 @@ function openBookmark(bookmark: Bookmark) {
 
       <p v-if="themeMessage" class="alert alert--error">{{ themeMessage }}</p>
       <p v-if="orderMessage" class="alert alert--success">{{ orderMessage }}</p>
+      <p v-if="actionMessage" class="alert alert--success">{{ actionMessage }}</p>
       <section v-if="isAuthenticated && showForm" class="form-card">
         <header class="form-card__header">
           <h2>{{ editingId ? '编辑书签' : '新增书签' }}</h2>
@@ -906,7 +930,7 @@ function openBookmark(bookmark: Bookmark) {
       <template v-if="currentCategory === 'all'">
         <section
           v-for="group in groupedBookmarks"
-          :key="group.name"
+          :key="group.key"
           class="category-group"
         >
           <header class="category-group__header">
@@ -918,8 +942,8 @@ function openBookmark(bookmark: Bookmark) {
           </header>
           <div
             class="card-grid"
-            :ref="(el) => setContainerRef(group.name, el)"
-            :data-group="group.name"
+            :ref="(el) => setContainerRef(group.key, el)"
+            :data-group="encodeGroupKey(group.key)"
           >
             <article
               v-for="bookmark in group.bookmarks"
@@ -929,28 +953,37 @@ function openBookmark(bookmark: Bookmark) {
               @click="openBookmark(bookmark)"
             >
               <header class="card__header">
-                <span
-                  v-if="isAuthenticated"
-                  class="card__drag-handle"
-                  title="拖动调整顺序"
-                  @click.stop
+                <div class="card__header-main">
+                  <h3 class="card__title">
+                    <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
+                  </h3>
+                </div>
+                <div
+                  v-if="bookmark.visible === false || isAuthenticated"
+                  class="card__header-actions"
                 >
-                  ⠿
-                </span>
-                <h3 class="card__title">
-                  <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
-                </h3>
-                <span v-if="bookmark.visible === false" class="hidden-chip">已隐藏</span>
-              </header>
-              <p v-if="bookmark.description" class="card__description">{{ bookmark.description }}</p>
-              <p class="card__url">{{ bookmark.url }}</p>
-              <footer class="card__footer" v-if="isAuthenticated">
-                <div class="card__buttons">
-                  <button class="button button--icon" @click.stop="removeBookmark(bookmark.id)" title="删除">
+                  <span v-if="bookmark.visible === false" class="hidden-chip">已隐藏</span>
+                  <span
+                    v-if="isAuthenticated"
+                    class="card__drag-handle"
+                    title="拖动调整顺序"
+                    @click.stop
+                  >
+                    ⠿
+                  </span>
+                  <button
+                    v-if="isAuthenticated"
+                    class="card__action-button"
+                    type="button"
+                    @click.stop="removeBookmark(bookmark.id)"
+                    title="删除"
+                  >
                     ×
                   </button>
                 </div>
-              </footer>
+              </header>
+              <p v-if="bookmark.description" class="card__description">{{ bookmark.description }}</p>
+              <p class="card__url">{{ bookmark.url }}</p>
             </article>
           </div>
         </section>
@@ -960,14 +993,16 @@ function openBookmark(bookmark: Bookmark) {
         <header class="category-group__header">
           <div class="category-title">
             <span class="category-title__icon">📚</span>
-            <span class="category-title__text">{{ currentCategory }}</span>
+            <span class="category-title__text">
+              {{ categoryLabelFromKey(currentCategory) }}
+            </span>
           </div>
           <span class="category-badge">{{ categoryFiltered.length }}</span>
         </header>
         <div
           class="card-grid"
           :ref="(el) => setContainerRef(currentCategory, el)"
-          :data-group="currentCategory"
+          :data-group="encodeGroupKey(currentCategory)"
         >
           <article
             v-for="bookmark in categoryFiltered"
@@ -975,30 +1010,39 @@ function openBookmark(bookmark: Bookmark) {
             :class="['card', { 'card--hidden': bookmark.visible === false }]"
             :data-bookmark-id="bookmark.id"
             @click="openBookmark(bookmark)"
-          >
-            <header class="card__header">
-              <span
-                v-if="isAuthenticated"
-                class="card__drag-handle"
-                title="拖动调整顺序"
-                @click.stop
-              >
-                ⠿
-              </span>
-              <h3 class="card__title">
-                <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
-              </h3>
-              <span v-if="bookmark.visible === false" class="hidden-chip">已隐藏</span>
-            </header>
+            >
+              <header class="card__header">
+                <div class="card__header-main">
+                  <h3 class="card__title">
+                    <a :href="bookmark.url" target="_blank" rel="noreferrer">{{ bookmark.title }}</a>
+                  </h3>
+                </div>
+                <div
+                  v-if="bookmark.visible === false || isAuthenticated"
+                  class="card__header-actions"
+                >
+                  <span v-if="bookmark.visible === false" class="hidden-chip">已隐藏</span>
+                  <span
+                    v-if="isAuthenticated"
+                    class="card__drag-handle"
+                    title="拖动调整顺序"
+                    @click.stop
+                  >
+                    ⠿
+                  </span>
+                  <button
+                    v-if="isAuthenticated"
+                    class="card__action-button"
+                    type="button"
+                    @click.stop="removeBookmark(bookmark.id)"
+                    title="删除"
+                  >
+                    ×
+                  </button>
+                </div>
+              </header>
             <p v-if="bookmark.description" class="card__description">{{ bookmark.description }}</p>
             <p class="card__url">{{ bookmark.url }}</p>
-            <footer class="card__footer" v-if="isAuthenticated">
-              <div class="card__buttons">
-                <button class="button button--icon" @click.stop="removeBookmark(bookmark.id)" title="删除">
-                  ×
-                </button>
-              </div>
-            </footer>
           </article>
         </div>
       </section>
@@ -1321,7 +1365,9 @@ function openBookmark(bookmark: Bookmark) {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
+  flex: 1;
+  min-width: 0;
 }
 
 .brand__icon {
@@ -1340,6 +1386,31 @@ function openBookmark(bookmark: Bookmark) {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
+}
+
+.brand__search {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--search-bg);
+  border-radius: 999px;
+  padding: 8px 16px;
+  flex: 1;
+  max-width: 420px;
+}
+
+.brand__search .search-input__icon {
+  font-size: 20px;
+  opacity: 0.72;
+}
+
+.brand__search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  outline: none;
+  color: inherit;
 }
 
 .topbar__actions {
@@ -1433,13 +1504,6 @@ function openBookmark(bookmark: Bookmark) {
   gap: 24px;
   padding: 0 24px 56px;
   box-sizing: border-box;
-}
-
-.search-card {
-  background: var(--surface-glass);
-  border-radius: 24px;
-  padding: 28px;
-  box-shadow: 0 20px 40px var(--surface-shadow);
 }
 
 .search-input {
@@ -1667,12 +1731,12 @@ function openBookmark(bookmark: Bookmark) {
 
 .category-group {
   background: var(--surface-glass);
-  border-radius: 24px;
-  padding: 24px 24px 30px;
-  box-shadow: 0 16px 36px var(--surface-shadow);
+  border-radius: 22px;
+  padding: 20px;
+  box-shadow: 0 14px 30px var(--surface-shadow);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .category-group__header {
@@ -1705,21 +1769,24 @@ function openBookmark(bookmark: Bookmark) {
 
 .card-grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: stretch;
 }
 
 .card {
   background: var(--surface-card);
-  border-radius: 20px;
-  padding: 20px;
+  border-radius: 18px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   box-shadow: inset 0 0 0 1px var(--surface-border);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   cursor: pointer;
   position: relative;
+  height: 100%;
 }
 
 .card:hover {
@@ -1729,17 +1796,33 @@ function openBookmark(bookmark: Bookmark) {
 
 .card__header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card__header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .card__title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card__title a {
@@ -1750,54 +1833,45 @@ function openBookmark(bookmark: Bookmark) {
 .card__description {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.6;
-  min-height: 42px;
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 36px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card__url {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--accent-text);
   word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.card__footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.card__buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.card__buttons .button {
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-.button--icon {
+.card__action-button {
   width: 28px;
   height: 28px;
   border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+  font-size: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  font-size: 18px;
   line-height: 1;
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--danger-text);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
-.button--icon:hover {
-  background: rgba(239, 68, 68, 0.2);
+
+.card__action-button:hover {
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(148, 163, 184, 0.5);
+  color: var(--text-primary);
 }
 
 .card--hidden {
@@ -1872,12 +1946,21 @@ function openBookmark(bookmark: Bookmark) {
 
 .card__drag-handle {
   cursor: grab;
-  font-size: 18px;
+  font-size: 16px;
   color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .card__drag-handle:active {
   cursor: grabbing;
+  background: rgba(148, 163, 184, 0.2);
 }
 
 .card--dragging {
@@ -1887,17 +1970,44 @@ function openBookmark(bookmark: Bookmark) {
 @media (max-width: 768px) {
   .topbar {
     padding: 16px 20px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
   }
 
   .topbar__actions {
     width: 100%;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .brand {
+    flex-wrap: wrap;
     gap: 12px;
   }
 
-  .theme-switcher {
+  .brand__search {
     width: 100%;
-    justify-content: space-between;
+    max-width: none;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .card__description {
+    min-height: auto;
+  }
+
+  .card__title {
+    font-size: 15px;
   }
 
   .category-tabs {
@@ -1935,43 +2045,42 @@ function openBookmark(bookmark: Bookmark) {
   }
 
   .card-grid {
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  }
-}
-
-@media (max-width: 540px) {
-  .topbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
+    grid-template-columns: 1fr;
   }
 
-  .brand {
+  .button {
     width: 100%;
-    justify-content: space-between;
+    padding: 8px 12px;
+    font-size: 12px;
+    min-width: 0;
+    grid-column: span 1;
   }
 
-  .topbar__actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .theme-switcher {
-    align-items: stretch;
-  }
-
-  .theme-switcher label {
-    width: 100%;
-    justify-content: space-between;
+  .add-button {
+    grid-column: span 1;
+    justify-content: center;
   }
 
   .hidden-toggle {
-    justify-content: space-between;
+    width: 100%;
+    grid-column: span 2;
+    order: unset;
   }
 
   .profile {
     width: 100%;
+    grid-column: span 2;
+    order: unset;
     justify-content: space-between;
+  }
+
+  .login-button {
+    grid-column: span 2;
+  }
+
+  .save-button,
+  .add-button {
+    grid-row: auto;
   }
 
   .search-input {
@@ -2016,6 +2125,30 @@ function openBookmark(bookmark: Bookmark) {
 
   .tab {
     padding: 10px 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .card {
+    padding: 14px;
+    border-radius: 15px;
+  }
+
+  .card__title {
+    font-size: 14px;
+  }
+
+  .card__description {
+    font-size: 13px;
+  }
+
+  .card__url {
+    font-size: 12px;
   }
 }
 </style>

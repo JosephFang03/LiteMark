@@ -26,6 +26,7 @@ function sanitizeUrl(url: string): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log(req, res);
   if (handleOptions(req, res, 'GET,PUT,DELETE,OPTIONS')) {
     return;
   }
@@ -44,7 +45,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     try {
+      console.log('更新书签');
       const body = await parseJsonBody<BookmarkBody>(req);
+      console.log('更新书签body', body);
       const title = body.title?.trim();
       const url = body.url?.trim();
       if (!title || !url) {
@@ -76,11 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     try {
+      console.log('删除书签');
       const deleted = await deleteBookmark(id);
+      console.log('删除书签deleted', deleted);
       if (!deleted) {
         sendError(res, 404, '书签不存在');
         return;
       }
+      console.log('删除书签成功');
       sendJson(res, 200, deleted);
     } catch (error) {
       console.error('删除书签失败', error);

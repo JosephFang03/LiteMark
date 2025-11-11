@@ -8,7 +8,6 @@ export type BookmarkRecord = {
   category?: string;
   description?: string;
   visible: boolean;
-  weight: number;
 };
 
 type BookmarkInput = {
@@ -31,166 +30,62 @@ const DEFAULT_SETTINGS: SettingsData = {
   siteIcon: '🔖'
 };
 
-const SETTINGS_CACHE_TTL = Number(process.env.SETTINGS_CACHE_TTL_MS ?? '60000');
-const BOOKMARKS_CACHE_TTL = Number(process.env.BOOKMARKS_CACHE_TTL_MS ?? '60000');
+type StoredBookmark = BookmarkRecord & { weight?: number };
 
-type SettingsCache = {
-  value: SettingsData;
-};
-
-let settingsCache: SettingsCache | null = null;
-let settingsRefreshTimer: NodeJS.Timeout | null = null;
-
-type BookmarksCache = {
-  value: BookmarkRecord[];
-};
-
-let bookmarksCache: BookmarksCache | null = null;
-let bookmarksRefreshTimer: NodeJS.Timeout | null = null;
-
-function refreshSettingsCache() {
-  readJson('settings', DEFAULT_SETTINGS)
-    .then((settings) => {
-      settingsCache = {
-        value: settings
-      };
-    })
-    .catch((error) => {
-      console.error('刷新站点设置缓存失败：', error);
-    })
-    .finally(() => {
-      if (SETTINGS_CACHE_TTL > 0) {
-        settingsRefreshTimer = setTimeout(refreshSettingsCache, SETTINGS_CACHE_TTL);
-      }
-    });
+function normalizeCategoryValue(value?: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
-export async function forceRefreshSettingsCache(): Promise<SettingsData> {
-  if (settingsRefreshTimer) {
-    clearTimeout(settingsRefreshTimer);
-    settingsRefreshTimer = null;
+function bookmarkCategoryKey(bookmark: BookmarkRecord | StoredBookmark): string {
+  return normalizeCategoryValue(bookmark.category) ?? '';
+}
+
+function normalizeCategoryKeyInput(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
   }
-  const settings = await readJson('settings', DEFAULT_SETTINGS);
-  settingsCache = {
-    value: settings
+  return value.trim();
+}
+
+function stripWeight(bookmark: StoredBookmark): BookmarkRecord {
+  const { weight: _weight, ...rest } = bookmark;
+  return {
+    ...rest,
+    category: normalizeCategoryValue(rest.category)
   };
-  ensureSettingsRefreshTimer();
-  return settings;
 }
 
-function ensureSettingsRefreshTimer() {
-  if (SETTINGS_CACHE_TTL <= 0) {
-    return;
-  }
-  if (!settingsRefreshTimer) {
-    settingsRefreshTimer = setTimeout(refreshSettingsCache, SETTINGS_CACHE_TTL);
-  }
+async function readBookmarksFromStorage(): Promise<BookmarkRecord[]> {
+  const data = await readJson('bookmarks', [] as StoredBookmark[]);
+  return data.map(stripWeight);
 }
 
-function refreshBookmarksCache() {
-  readJson('bookmarks', [] as BookmarkRecord[])
-    .then((records) => {
-      bookmarksCache = {
-        value: records
-      };
-    })
-    .catch((error) => {
-      console.error('刷新书签缓存失败：', error);
-    })
-    .finally(() => {
-      if (BOOKMARKS_CACHE_TTL > 0) {
-        bookmarksRefreshTimer = setTimeout(refreshBookmarksCache, BOOKMARKS_CACHE_TTL);
-      }
-    });
+async function writeBookmarksToStorage(bookmarks: BookmarkRecord[]) {
+  const sanitized = bookmarks.map((bookmark) => ({
+    ...bookmark,
+    category: normalizeCategoryValue(bookmark.category)
+  }));
+  await writeJson('bookmarks', sanitized);
 }
 
-function ensureBookmarksRefreshTimer() {
-  if (BOOKMARKS_CACHE_TTL <= 0) {
-    return;
-  }
-  if (!bookmarksRefreshTimer) {
-    bookmarksRefreshTimer = setTimeout(refreshBookmarksCache, BOOKMARKS_CACHE_TTL);
-  }
+async function readSettingsFromStorage(): Promise<SettingsData> {
+  return readJson('settings', DEFAULT_SETTINGS);
 }
 
-async function loadBookmarks(): Promise<BookmarkRecord[]> {
-  if (bookmarksCache) {
-    ensureBookmarksRefreshTimer();
-    return [...bookmarksCache.value];
-  }
-  const data = await readJson('bookmarks', [] as BookmarkRecord[]);
-  bookmarksCache = {
-    value: data
-  };
-  ensureBookmarksRefreshTimer();
-  return [...data];
-}
-
-async function loadBookmarksFresh(): Promise<BookmarkRecord[]> {
-  const data = await readJson('bookmarks', [] as BookmarkRecord[]);
-  bookmarksCache = {
-    value: data
-  };
-  ensureBookmarksRefreshTimer();
-  return [...data];
-}
-
-async function saveBookmarks(bookmarks: BookmarkRecord[]) {
-  await writeJson('bookmarks', bookmarks);
-  bookmarksCache = {
-    value: [...bookmarks]
-  };
-  if (bookmarksRefreshTimer) {
-    clearTimeout(bookmarksRefreshTimer);
-    bookmarksRefreshTimer = null;
-  }
-  ensureBookmarksRefreshTimer();
-}
-
-export async function forceRefreshBookmarksCache(): Promise<BookmarkRecord[]> {
-  if (bookmarksRefreshTimer) {
-    clearTimeout(bookmarksRefreshTimer);
-    bookmarksRefreshTimer = null;
-  }
-  const data = await readJson('bookmarks', [] as BookmarkRecord[]);
-  bookmarksCache = {
-    value: data
-  };
-  ensureBookmarksRefreshTimer();
-  return [...data];
-}
-
-async function loadSettings(): Promise<SettingsData> {
-  if (settingsCache) {
-    ensureSettingsRefreshTimer();
-    return settingsCache.value;
-  }
-  const settings = await readJson('settings', DEFAULT_SETTINGS);
-  settingsCache = {
-    value: settings
-  };
-  ensureSettingsRefreshTimer();
-  return settings;
-}
-
-async function saveSettings(settings: SettingsData) {
+async function writeSettingsToStorage(settings: SettingsData) {
   await writeJson('settings', settings);
-  settingsCache = {
-    value: settings
-  };
-  if (settingsRefreshTimer) {
-    clearTimeout(settingsRefreshTimer);
-    settingsRefreshTimer = null;
-  }
-  ensureSettingsRefreshTimer();
 }
 
 export async function getSettings(): Promise<SettingsData> {
-  return loadSettings();
+  return readSettingsFromStorage();
 }
 
 export async function updateSettings(partial: Partial<SettingsData>): Promise<SettingsData> {
-  const current = await loadSettings();
+  const current = await readSettingsFromStorage();
   const next: SettingsData = {
     ...current,
     ...partial,
@@ -198,64 +93,90 @@ export async function updateSettings(partial: Partial<SettingsData>): Promise<Se
     siteTitle: partial.siteTitle ?? current.siteTitle,
     siteIcon: partial.siteIcon ?? current.siteIcon
   };
-  await saveSettings(next);
+  await writeSettingsToStorage(next);
   return next;
 }
 
-ensureSettingsRefreshTimer();
-ensureBookmarksRefreshTimer();
-
 export async function listBookmarks(): Promise<BookmarkRecord[]> {
-  return loadBookmarks();
+  return readBookmarksFromStorage();
 }
 
 export async function createBookmark(data: BookmarkInput): Promise<BookmarkRecord> {
-  const bookmarks = await loadBookmarksFresh();
-  let nextWeight = 1;
-  if (bookmarks.length > 0) {
-    nextWeight = Math.max(...bookmarks.map((item) => item.weight ?? 0)) + 1;
-  }
+  const bookmarks = await readBookmarksFromStorage();
   const bookmark: BookmarkRecord = {
     id: randomUUID(),
     title: data.title,
     url: data.url,
-    category: data.category,
+    category: normalizeCategoryValue(data.category),
     description: data.description,
-    visible: data.visible,
-    weight: nextWeight
+    visible: data.visible
   };
-  bookmarks.unshift(bookmark);
-  await saveBookmarks(bookmarks);
+  bookmarks.push(bookmark);
+  await writeBookmarksToStorage(bookmarks);
   return bookmark;
 }
 
 export async function reorderBookmarks(order: string[]): Promise<BookmarkRecord[]> {
-  const bookmarks = await loadBookmarksFresh();
+  const bookmarks = await readBookmarksFromStorage();
   const map = new Map<string, BookmarkRecord>();
   bookmarks.forEach((bookmark) => {
     map.set(bookmark.id, bookmark);
   });
 
   const reordered: BookmarkRecord[] = [];
-  let weight = 1;
   order.forEach((id) => {
     const record = map.get(id);
     if (record) {
-      reordered.push({ ...record, weight });
+      reordered.push(record);
       map.delete(id);
-      weight += 1;
     }
   });
+
+  map.forEach((bookmark) => {
+    reordered.push(bookmark);
+  });
+
+  await writeBookmarksToStorage(reordered);
+  return reordered;
+}
+
+export async function reorderBookmarkCategories(order: string[]): Promise<BookmarkRecord[]> {
+  const bookmarks = await readBookmarksFromStorage();
+  const categoryMap = new Map<string, BookmarkRecord[]>();
+  const originalOrder: string[] = [];
 
   bookmarks.forEach((bookmark) => {
-    if (map.has(bookmark.id)) {
-      reordered.push({ ...bookmark, weight });
-      weight += 1;
-      map.delete(bookmark.id);
+    const key = bookmarkCategoryKey(bookmark);
+    if (!categoryMap.has(key)) {
+      categoryMap.set(key, []);
+      originalOrder.push(key);
+    }
+    categoryMap.get(key)!.push(bookmark);
+  });
+
+  const requestedOrder: string[] = [];
+  order.forEach((value) => {
+    const key = normalizeCategoryKeyInput(value);
+    if (categoryMap.has(key) && !requestedOrder.includes(key)) {
+      requestedOrder.push(key);
     }
   });
 
-  await saveBookmarks(reordered);
+  originalOrder.forEach((key) => {
+    if (!requestedOrder.includes(key)) {
+      requestedOrder.push(key);
+    }
+  });
+
+  const reordered: BookmarkRecord[] = [];
+  requestedOrder.forEach((key) => {
+    const items = categoryMap.get(key);
+    if (items) {
+      reordered.push(...items);
+    }
+  });
+
+  await writeBookmarksToStorage(reordered);
   return reordered;
 }
 
@@ -263,7 +184,7 @@ export async function updateBookmark(
   id: string,
   data: BookmarkInput
 ): Promise<BookmarkRecord | null> {
-  const bookmarks = await loadBookmarksFresh();
+  const bookmarks = await readBookmarksFromStorage();
   const index = bookmarks.findIndex((item) => item.id === id);
   if (index === -1) {
     return null;
@@ -273,23 +194,23 @@ export async function updateBookmark(
     ...existing,
     title: data.title,
     url: data.url,
-    category: data.category,
+    category: normalizeCategoryValue(data.category),
     description: data.description,
     visible: data.visible
   };
   bookmarks[index] = updated;
-  await saveBookmarks(bookmarks);
+  await writeBookmarksToStorage(bookmarks);
   return updated;
 }
 
 export async function deleteBookmark(id: string): Promise<BookmarkRecord | null> {
-  const bookmarks = await loadBookmarksFresh();
+  const bookmarks = await readBookmarksFromStorage();
   const index = bookmarks.findIndex((item) => item.id === id);
   if (index === -1) {
     return null;
   }
   const [removed] = bookmarks.splice(index, 1);
-  await saveBookmarks(bookmarks);
+  await writeBookmarksToStorage(bookmarks);
   return removed;
 }
 

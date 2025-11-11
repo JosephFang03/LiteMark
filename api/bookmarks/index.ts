@@ -34,7 +34,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'GET') {
     try {
+      console.log('获取书签');
       const bookmarks = await listBookmarks();
+      console.log('书签', bookmarks);
       sendJson(res, 200, bookmarks);
     } catch (error) {
       console.error('获取书签失败', error);

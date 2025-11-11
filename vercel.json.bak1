@@ -1,0 +1,8 @@
+{
+  "framework": "none",
+  "devCommand": "",
+  "buildCommand": "",
+  "functions": {
+    "api/**/*.ts": { "runtime": "@vercel/node@3.2.8" }
+  }
+}

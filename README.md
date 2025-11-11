@@ -1,138 +1,82 @@
 # LiteMark
 
-一个基于 Vue 3 + Vite 构建的个人书签管理应用，支持站点主题切换、书签增删改查以及多种对象存储驱动。
+LiteMark 是一款基于 **Vue 3 + Vite** 的个人书签管理应用，提供响应式双端体验、后台管理面板以及多种对象存储驱动。当前前端和后端（Vercel Functions）已深度集成，只需少量配置即可在本地或 Vercel 上快速运行。
 
-## Vercel 部署快速指南
+---
 
-1. **Fork / 克隆仓库**
-   - 在 GitHub 上点击 “Fork” 将本仓库复制到自己的账号下，或 `git clone` 后推送到私有仓库。
-2. **创建 Vercel Blob（可选，使用默认存储时必选）**
-   - 登陆 [Vercel 控制台](https://vercel.com/)，在 `Storage → Blob` 新建一个 Blob Store，生成令牌。
-3. **导入项目**
-   - 打开 Vercel → “New Project”，选择刚刚 Fork 的仓库。
-4. **配置环境变量**
-   - 在 `Project Settings → Environment Variables` 填入所需变量（见下文“环境变量”一节）。
-   - 对于 Vercel Blob，需设置 `BLOB_READ_WRITE_TOKEN`（或 `VERCEL_BLOB_READ_WRITE_TOKEN`）。
-   - 可下载.env.local  根据需要配置环境变量，可直接导入文件
-5. **可选：配置 `vercel.json`**
-   - 若需自定义缓存 / SPA 路由，可在仓库根目录创建 `vercel.json`（示例见下文）。
-6. **Deploy**
-   - 点击 “Deploy”，等待构建完成。首个部署完成后，访问 `https://<project-name>.vercel.app` 即可访问首页，`/admin` 为后台入口。
+## 功能亮点
 
-> 若 `/admin` 返回 404，请确认 `vercel.json` 中的 rewrites 是否正确。
+- 📚 **书签管理**：支持添加、编辑、删除、隐藏与排序；分类顺序与分类内顺序均可拖拽调整。
+- 🎨 **主题定制**：内置多套主题，可在后台即时切换；支持自定义站点标题和图标。
+- 🔍 **高效浏览**：搜索框置于顶栏，移动端卡片两列展示并自动适配描述内容。
+- 🔐 **后台面板**：位于 `/admin`，含登录校验、缓存刷新、站点设置等管理动作。
+- ☁️ **灵活存储**：内置 Vercel Blob、S3、R2、OSS、COS、WebDAV 等驱动，支持热插拔配置。
+- 🚀 **极佳体验**：SSR 友好的 API、前端缓存提示、响应式布局与移动端操作优化。
 
-## 功能概览
+---
 
-- 响应式书签展示、搜索与分类统计
-- 多主题（浅色、深色、Forest、Ocean 等）切换
-- 管理端（`/admin`）：书签 CRUD、隐藏/显示、主题/站点信息维护
-- 多存储驱动：Vercel Blob（默认）、S3、Cloudflare R2、阿里云 OSS、腾讯云 COS、WebDAV
-- 内存缓存 + 定时刷新，可手动刷新缓存
+## 部署到 Vercel
 
-## 开发环境
+1. **Fork / Clone** 仓库，并推送至自己的 Git 仓库。
+2. 在 Vercel 创建新项目，导入仓库。
+3. 项目设置 → **Environment Variables**，填入 `.env.local` 中的变量（见下表）。
+4. 点击 **Deploy**，等待构建完成。前端地址为 `https://<project>.vercel.app`，后台入口 `https://<project>.vercel.app/admin`。
 
-```bash
-# 安装依赖
-npm install
-# 或使用 pnpm / yarn / bun
-pnpm install
-yarn install
-bun install
+> 若部署后 `/api` 返回静态页面或 404，多半是 `vercel.json` 不存在或命名错误（确保文件名为 `vercel.json`）。
 
-# 本地开发（默认 5173 端口）
-npm run dev
+---
 
-# 调试 Vercel Functions（需安装 Vercel CLI）
-vercel dev
+## 环境变量清单
 
-# 生产构建
-npm run build
-
-# 预览生产构建
-npm run preview
-```
-
-> 本地开发默认只启动前端，若希望同时调试 Serverless API，可使用 `vercel dev` 或部署到线上端点并设置 `VITE_API_BASE_URL`。
-
-## 环境变量
-
-在根目录创建 `.env.local`，或在 Vercel 项目中配置同名变量：
+在根目录 `.env.local` 或 Vercel 控制台中配置：
 
 | 变量 | 说明 | 默认值 |
-| ---- | ---- | ------ |
-| `VITE_API_BASE_URL` | 前端调用 API 的基础地址。开发可设 `http://localhost:3000`。 | 空字符串（等同当前域名） |
-| `STORAGE_DRIVER` | 对象存储驱动：`vercel-blob` / `s3` / `r2` / `oss` / `cos` / `webdav` | `vercel-blob` |
-| `BLOB_READ_WRITE_TOKEN` | 使用 Vercel Blob 时的令牌 | - |
-| `SETTINGS_CACHE_TTL_MS` | 站点设置缓存刷新周期（毫秒，0 关闭缓存） | `60000` |
-| `BOOKMARKS_CACHE_TTL_MS` | 书签缓存刷新周期（毫秒，0 关闭缓存） | `60000` |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | 前端调用 API 的基础地址；留空则使用当前域名。 | _(空字符串)_ |
+| `STORAGE_DRIVER` | 存储驱动：`vercel-blob` / `s3` / `r2` / `oss` / `cos` / `webdav`。 | `vercel-blob` |
+| `BLOB_READ_WRITE_TOKEN` | 使用 Vercel Blob 必填的令牌。 | - |
+| `ADMIN_USERNAME` | 后台登录用户名。 | `admin` |
+| `ADMIN_PASSWORD` | 后台登录密码。 | `admin123` |
 
-不同存储驱动还需补充各自的 Bucket、AccessKey 等配置，可参考 `api/_lib/storage.ts`。
+> 选择非默认存储驱动时，请补充对应的 Bucket、Endpoint、密钥等字段，可参考 `api/_lib/storage.ts` 内的 `ensureXXXClient` 实现。
 
-## 可选：定制 `vercel.json`
+---
 
-```json
-{
-  "headers": [
-    {
-      "source": "/(.*)\\.(js|css|json|svg|png|jpg|jpeg|gif|webp|ico|woff2?)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
-    }
-  ],
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
-  ]
-}
-```
-
-- 若希望关闭浏览器缓存，可将 `Cache-Control` 改为 `no-store`。
-- 若使用 SPA 路由，`rewrites` 必须存在，避免 `/admin` 打开 404。
-
-## 本地调试 API
-
-- `npm run dev` 仅启动前端；API 需部署在 Vercel 或运行 `vercel dev`。
-- 开发时可将 `VITE_API_BASE_URL` 指向线上 API（例如 `https://<project>.vercel.app`）。
-- 后端函数的日志可在 Vercel Dashboard → Functions 查看。
-
-## 缓存刷新说明
-
-- **站点设置 / 书签缓存**：后端首读后写入内存，按 TTL 自动刷新；后台“刷新数据”按钮会同时刷新两类缓存并重新加载前端数据。
-- **前端静态资源**：默认使用带 hash 的文件名，可通过 `vercel.json` 调整缓存策略。
-- **API 304 响应**：请求会命中缓存但仍需网络验证。若希望完全禁用浏览器缓存，可在 `vercel.json` 中设置 `no-store`。
-
-## 常见问题
-
-1. `/admin` 404：检查 rewrites 或确认函数部署成功。
-2. 刷新数据按钮无效：确认已登录，并在 Network 面板查看 `/api/settings/refresh` 与 `/api/bookmarks/refresh` 的响应码。
-3. 书签列表为空：检查存储配置或在后台刷新缓存。
-4. 本地跨域：确保前端 `VITE_API_BASE_URL` 与后端一致，或调整 CORS。
-
-## 目录结构
+## 项目结构
 
 ```
 ├─ api/
-│  ├─ bookmarks/
-│  │  ├─ index.ts          # 列表、创建、删除、更新
-│  │  └─ refresh.ts        # 刷新书签缓存
-│  ├─ settings/
-│  │  ├─ index.ts          # 获取/更新站点设置
-│  │  └─ refresh.ts        # 刷新站点设置缓存
-│  └─ _lib/                # 存储、缓存、鉴权等工具
+│  ├─ auth/                 # 登录接口
+│  ├─ bookmarks/            # 书签 CRUD、排序、刷新
+│  ├─ settings/             # 站点设置获取/修改、刷新
+│  └─ _lib/                 # 鉴权、存储、缓存等辅助模块
 ├─ src/
 │  ├─ pages/
-│  │  ├─ HomePage.vue      # 首页书签展示
-│  │  └─ AdminDashboard.vue # 后台管理
-│  ├─ App.vue               # RouterView 容器
+│  │  ├─ HomePage.vue       # 前台书签展示
+│  │  └─ AdminDashboard.vue # 后台管理面板
+│  ├─ App.vue               # 路由容器
 │  └─ main.ts               # 应用入口
 └─ public/                  # 静态资源
 ```
 
-## 更新记录
+---
 
-- 多存储驱动支持：Vercel Blob / S3 / R2 / OSS / COS / WebDAV。
-- 后台管理页面：书签 CRUD、站点主题与图标配置、缓存刷新。
-- 站点设置与书签的内存缓存 + 定时刷新，后台按钮可手动刷新。
-- 响应式布局和移动端优化。
+## 常见问题 FAQ
 
-欢迎提交 Issue 或 PR 改进项目。
+1. **部署后 `/api` 无法访问？**
+   - 检查仓库根目录是否存在 `vercel.json`，文件名不能改成其它名字。
+   - 确认项目环境变量已配置且重新部署。
+
+2. **后台排序没生效或提示 401？**
+   - 需先登录后台才能操作；如已登录却 401，请确认 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD` 是否与 `.env.local` 匹配。
+
+3. **书签分类顺序错乱？**
+   - 后台的“保存分类顺序”按钮会落盘分类排序；保存后刷新页面即可同步。
+
+4. **本地 `npm run dev` 访问不到 API？**
+   - 在 `.env.local` 中设置 `VITE_API_BASE_URL` 指向部署好的地址，或使用 `vercel dev` 同时启动函数。
+
+5. **存储驱动切换失败？**
+   - 确认环境变量已更新并重新部署；若仍报错，请查看函数日志排查访问凭证或网络策略问题。
+
+更多使用说明请参考 [`api.md`](./api.md)。欢迎提交 Issue / PR 优化功能。

@@ -9,8 +9,15 @@ type Bookmark = {
   category?: string;
   description?: string;
   visible?: boolean;
-  weight?: number;
 };
+
+function categoryKeyFromBookmark(bookmark: Bookmark): string {
+  return bookmark.category?.trim() ?? '';
+}
+
+function categoryLabelFromKey(key: string): string {
+  return key || '默认分类';
+}
 
 const router = useRouter();
 
@@ -82,6 +89,18 @@ const currentUser = ref<string>(storedUser || '');
 
 const isAuthenticated = computed(() => Boolean(authToken.value));
 
+const categoryOrder = ref<string[]>([]);
+const categoryOrderDraft = ref<string[]>([]);
+const categoryOrderSaving = ref(false);
+const categoryOrderMessage = ref('');
+const categoryOrderError = ref('');
+const categoryOrderDirty = computed(() => {
+  if (categoryOrderDraft.value.length !== categoryOrder.value.length) {
+    return true;
+  }
+  return categoryOrderDraft.value.some((key, index) => key !== categoryOrder.value[index]);
+});
+
 const filteredBookmarks = computed(() => {
   const keyword = search.value.trim().toLowerCase();
   if (!keyword) {
@@ -109,12 +128,6 @@ const categoryCount = computed(() => {
     set.add(normalizeCategory(bookmark));
   });
   return set.size;
-});
-
-const recentBookmarks = computed(() => {
-  return [...bookmarks.value]
-    .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
-    .slice(0, 5);
 });
 
 const categorySuggestions = computed(() => {
@@ -160,7 +173,7 @@ watch(currentTheme, (value) => {
 });
 
 function normalizeCategory(bookmark: Bookmark) {
-  return bookmark.category?.trim() || '默认分类';
+  return categoryLabelFromKey(categoryKeyFromBookmark(bookmark));
 }
 
 function applyTheme(theme: string) {
@@ -255,6 +268,35 @@ async function requestWithAuth(input: RequestInfo | URL, init: RequestInit = {})
   return response;
 }
 
+function deriveCategoryOrder(list: Bookmark[]): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  list.forEach((bookmark) => {
+    const key = categoryKeyFromBookmark(bookmark);
+    if (!seen.has(key)) {
+      seen.add(key);
+      order.push(key);
+    }
+  });
+  return order;
+}
+
+function syncCategoryOrderFromBookmarks(list: Bookmark[], preserveDraft = false) {
+  const order = deriveCategoryOrder(list);
+  categoryOrder.value = order;
+  if (preserveDraft && categoryOrderDraft.value.length) {
+    const filtered = categoryOrderDraft.value.filter((key) => order.includes(key));
+    order.forEach((key) => {
+      if (!filtered.includes(key)) {
+        filtered.push(key);
+      }
+    });
+    categoryOrderDraft.value = filtered;
+  } else {
+    categoryOrderDraft.value = [...order];
+  }
+}
+
 async function loadBookmarks() {
   loading.value = true;
   error.value = null;
@@ -265,6 +307,7 @@ async function loadBookmarks() {
     }
     const data = (await response.json()) as Bookmark[];
     bookmarks.value = data;
+    syncCategoryOrderFromBookmarks(data);
   } catch (err) {
     error.value = err instanceof Error ? err.message : '未知错误';
   } finally {
@@ -538,41 +581,8 @@ function goHome() {
   router.push({ name: 'home' });
 }
 
-const cacheRefreshing = ref(false);
-const cacheMessage = ref('');
 const orderSaving = ref(false);
 const orderMessage = ref('');
-
-async function refreshData() {
-  if (!isAuthenticated.value || cacheRefreshing.value) {
-    if (!isAuthenticated.value) {
-      showLoginModal.value = true;
-    }
-    return;
-  }
-  cacheRefreshing.value = true;
-  cacheMessage.value = '';
-  try {
-    const [settingsResponse, bookmarksResponse] = await Promise.all([
-      requestWithAuth(`${apiBase}/api/settings/refresh`, { method: 'POST' }),
-      requestWithAuth(`${apiBase}/api/bookmarks/refresh`, { method: 'POST' })
-    ]);
-    if (!settingsResponse.ok) {
-      const message = await settingsResponse.text();
-      throw new Error(message || '刷新站点设置缓存失败');
-    }
-    if (!bookmarksResponse.ok) {
-      const message = await bookmarksResponse.text();
-      throw new Error(message || '刷新书签缓存失败');
-    }
-    await Promise.all([loadSettings(), loadBookmarks()]);
-    cacheMessage.value = '数据已刷新';
-  } catch (error) {
-    cacheMessage.value = error instanceof Error ? error.message : '刷新失败';
-  } finally {
-    cacheRefreshing.value = false;
-  }
-}
 
 async function persistOrder(list: Bookmark[]) {
   if (!isAuthenticated.value) {
@@ -592,6 +602,7 @@ async function persistOrder(list: Bookmark[]) {
     }
     const updated = (await response.json()) as Bookmark[];
     bookmarks.value = updated;
+    syncCategoryOrderFromBookmarks(updated, categoryOrderDirty.value);
     orderMessage.value = '书签排序已更新';
   } catch (error) {
     orderMessage.value = error instanceof Error ? error.message : '保存排序失败';
@@ -614,7 +625,62 @@ async function moveBookmark(bookmark: Bookmark, direction: number) {
   const [item] = list.splice(currentIndex, 1);
   list.splice(targetIndex, 0, item);
   bookmarks.value = list;
+  syncCategoryOrderFromBookmarks(list, categoryOrderDirty.value);
   await persistOrder(list);
+}
+
+function moveCategory(key: string, direction: number) {
+  const list = [...categoryOrderDraft.value];
+  const currentIndex = list.indexOf(key);
+  const targetIndex = currentIndex + direction;
+  if (currentIndex === -1 || targetIndex < 0 || targetIndex >= list.length) {
+    return;
+  }
+  list.splice(currentIndex, 1);
+  list.splice(targetIndex, 0, key);
+  categoryOrderDraft.value = list;
+  categoryOrderMessage.value = '';
+  categoryOrderError.value = '';
+}
+
+function resetCategoryOrder() {
+  categoryOrderDraft.value = [...categoryOrder.value];
+  categoryOrderMessage.value = '';
+  categoryOrderError.value = '';
+}
+
+async function saveCategoryOrder() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+  if (!categoryOrderDirty.value) {
+    categoryOrderMessage.value = '分类顺序未发生变化';
+    categoryOrderError.value = '';
+    return;
+  }
+  categoryOrderSaving.value = true;
+  categoryOrderMessage.value = '';
+  categoryOrderError.value = '';
+  try {
+    const response = await requestWithAuth(`${apiBase}/api/bookmarks/reorder-categories`, {
+      method: 'POST',
+      body: JSON.stringify({ order: categoryOrderDraft.value })
+    });
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || '保存分类顺序失败');
+    }
+    const updated = (await response.json()) as Bookmark[];
+    bookmarks.value = updated;
+    syncCategoryOrderFromBookmarks(updated);
+    categoryOrderMessage.value = '分类顺序已保存';
+  } catch (error) {
+    categoryOrderError.value =
+      error instanceof Error ? error.message : '保存分类顺序失败';
+  } finally {
+    categoryOrderSaving.value = false;
+  }
 }
 
 onMounted(() => {
@@ -668,15 +734,66 @@ onMounted(() => {
               <strong class="stat__value">{{ categoryCount }}</strong>
             </div>
           </div>
-          <div class="recent-list" v-if="recentBookmarks.length">
-            <h3>当前排序靠前的书签</h3>
-            <ul>
-              <li v-for="bookmark in recentBookmarks" :key="bookmark.id">
-                <span class="recent__title">{{ bookmark.title }}</span>
-                <span class="recent__time">权重：{{ bookmark.weight ?? 0 }}</span>
-              </li>
-            </ul>
+        </section>
+
+        <section class="card category-order-card">
+          <header class="card__header">
+            <div>
+              <h2>分类顺序</h2>
+              <p>拖动分类行或使用按钮调整展示顺序，点击保存后生效</p>
+            </div>
+          </header>
+          <div v-if="categoryOrderDraft.length" class="category-order-list">
+            <div
+              v-for="(key, index) in categoryOrderDraft"
+              :key="key || '__default__'"
+              class="category-order-item"
+            >
+              <span class="category-order-item__index">{{ index + 1 }}</span>
+              <span class="category-order-item__label">{{ categoryLabelFromKey(key) }}</span>
+              <div class="category-order-item__actions">
+                <button
+                  class="link-button"
+                  type="button"
+                  :disabled="index === 0 || categoryOrderSaving"
+                  @click="moveCategory(key, -1)"
+                >
+                  上移
+                </button>
+                <button
+                  class="link-button"
+                  type="button"
+                  :disabled="index === categoryOrderDraft.length - 1 || categoryOrderSaving"
+                  @click="moveCategory(key, 1)"
+                >
+                  下移
+                </button>
+              </div>
+            </div>
           </div>
+          <p v-else class="empty-placeholder">当前暂无分类</p>
+          <div class="category-order-actions">
+            <button
+              class="button button--primary"
+              type="button"
+              :disabled="categoryOrderSaving || !categoryOrderDirty"
+              @click="saveCategoryOrder"
+            >
+              {{ categoryOrderSaving ? '保存中...' : '保存分类顺序' }}
+            </button>
+            <button
+              class="button button--ghost"
+              type="button"
+              :disabled="categoryOrderSaving || !categoryOrderDirty"
+              @click="resetCategoryOrder"
+            >
+              取消更改
+            </button>
+          </div>
+          <p v-if="categoryOrderError" class="alert alert--error">{{ categoryOrderError }}</p>
+          <p v-else-if="categoryOrderMessage" class="alert alert--success">
+            {{ categoryOrderMessage }}
+          </p>
         </section>
 
         <section class="card settings-card">
@@ -722,25 +839,10 @@ onMounted(() => {
               <button class="button button--primary" type="submit" :disabled="siteSettingsSaving || !isAuthenticated">
                 {{ siteSettingsSaving ? '保存中...' : '保存设置' }}
               </button>
-              <button
-                class="button button--ghost"
-                type="button"
-                :disabled="cacheRefreshing || !isAuthenticated"
-                @click="refreshData"
-              >
-                {{ cacheRefreshing ? '刷新中...' : '刷新数据' }}
-              </button>
             </div>
           </form>
           <p v-if="siteSettingsError" class="alert alert--error">{{ siteSettingsError }}</p>
           <p v-else-if="siteSettingsMessage" class="alert alert--success">{{ siteSettingsMessage }}</p>
-          <p
-            v-if="cacheMessage"
-            class="alert"
-            :class="cacheMessage.includes('失败') ? 'alert--error' : 'alert--success'"
-          >
-            {{ cacheMessage }}
-          </p>
           <p
             v-if="orderMessage"
             class="alert"
@@ -773,9 +875,6 @@ onMounted(() => {
               >
                 新建书签
               </button>
-              <button class="button button--ghost" type="button" @click="loadBookmarks" :disabled="loading">
-                {{ loading ? '加载中...' : '刷新数据' }}
-              </button>
             </div>
           </header>
           <p v-if="error" class="alert alert--error">{{ error }}</p>
@@ -787,12 +886,12 @@ onMounted(() => {
                   <th>分类</th>
                   <th>链接</th>
                   <th>状态</th>
-                  <th>权重</th>
+                  <th>排序</th>
                   <th class="table-actions">操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="bookmark in filteredBookmarks" :key="bookmark.id">
+                <tr v-for="(bookmark, index) in filteredBookmarks" :key="bookmark.id">
                   <td>
                     <div class="table-title">{{ bookmark.title }}</div>
                     <div v-if="bookmark.description" class="table-desc">{{ bookmark.description }}</div>
@@ -806,7 +905,7 @@ onMounted(() => {
                       {{ bookmark.visible === false ? '隐藏' : '可见' }}
                     </span>
                   </td>
-                  <td>{{ bookmark.weight ?? 0 }}</td>
+                  <td>{{ index + 1 }}</td>
                   <td class="table-actions">
                     <button
                       class="link-button"
@@ -1039,38 +1138,43 @@ onMounted(() => {
   color: var(--accent-text);
 }
 
-.recent-list h3 {
-  margin: 12px 0 10px;
-  font-size: 15px;
-  color: var(--text-secondary);
-}
-
-.recent-list ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.category-order-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-.recent-list li {
-  display: flex;
-  justify-content: space-between;
+.category-order-item {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
   align-items: center;
-  padding: 10px 14px;
-  border-radius: 12px;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
   background: var(--surface-card);
   box-shadow: inset 0 0 0 1px var(--surface-border);
 }
 
-.recent__title {
+.category-order-item__index {
   font-weight: 600;
+  color: var(--accent-text);
 }
 
-.recent__time {
-  font-size: 12px;
-  color: var(--text-muted);
+.category-order-item__label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.category-order-item__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.category-order-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .settings-card .form-grid {

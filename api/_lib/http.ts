@@ -3,10 +3,16 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const DEFAULT_ALLOWED_ORIGIN = process.env.CORS_ORIGIN ?? '*';
 
 export function applyCors(res: VercelResponse, methods = 'GET,POST,PUT,DELETE,OPTIONS') {
-  res.setHeader('Access-Control-Allow-Origin', DEFAULT_ALLOWED_ORIGIN);
+  const origin = DEFAULT_ALLOWED_ORIGIN;
+  res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', methods);
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, Cache-Control'
+  );
+  if (origin !== '*') {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
 }
 
 export function handleOptions(req: VercelRequest, res: VercelResponse, methods?: string) {
