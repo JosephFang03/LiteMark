@@ -584,6 +584,95 @@ function goHome() {
 const orderSaving = ref(false);
 const orderMessage = ref('');
 
+const importLoading = ref(false);
+const importMessage = ref('');
+const importError = ref('');
+const importFileInput = ref<HTMLInputElement | null>(null);
+
+async function handleImportBookmarks() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+  
+  if (!importFileInput.value) {
+    return;
+  }
+  
+  const file = importFileInput.value.files?.[0];
+  if (!file) {
+    importError.value = '请选择要导入的书签文件';
+    return;
+  }
+  
+  if (!file.name.endsWith('.html')) {
+    importError.value = '请选择 HTML 格式的书签文件';
+    return;
+  }
+  
+  importLoading.value = true;
+  importMessage.value = '';
+  importError.value = '';
+  
+  try {
+    const fileContent = await file.text();
+    
+    const response = await requestWithAuth(`${apiBase}/api/bookmarks/import`, {
+      method: 'POST',
+      body: JSON.stringify({
+        html: fileContent,
+        overwrite: false
+      })
+    });
+    
+    if (!response.ok) {
+      let errorMessage = '导入失败';
+      try {
+        const errorData = (await response.json()) as { error?: string };
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        errorMessage = await response.text() || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+    
+    const result = (await response.json()) as {
+      success: boolean;
+      imported: number;
+      total: number;
+      errors?: string[];
+    };
+    
+    if (result.success) {
+      importMessage.value = `成功导入 ${result.imported} 个书签，共 ${result.total} 个`;
+      if (result.errors && result.errors.length > 0) {
+        importMessage.value += `，${result.errors.length} 个失败`;
+        console.warn('导入错误:', result.errors);
+      }
+      // 重新加载书签列表
+      await loadBookmarks();
+      // 清空文件选择器
+      if (importFileInput.value) {
+        importFileInput.value.value = '';
+      }
+    } else {
+      throw new Error('导入失败');
+    }
+  } catch (err) {
+    importError.value = err instanceof Error ? err.message : '导入失败';
+  } finally {
+    importLoading.value = false;
+  }
+}
+
+function triggerImportFile() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+  importFileInput.value?.click();
+}
+
 async function persistOrder(list: Bookmark[]) {
   if (!isAuthenticated.value) {
     showLoginModal.value = true;
@@ -867,6 +956,21 @@ onMounted(() => {
                   placeholder="搜索标题、链接或分类..."
                 />
               </div>
+              <input
+                ref="importFileInput"
+                type="file"
+                accept=".html"
+                style="display: none"
+                @change="handleImportBookmarks"
+              />
+              <button
+                class="button button--ghost"
+                type="button"
+                :disabled="!isAuthenticated || importLoading"
+                @click="triggerImportFile"
+              >
+                {{ importLoading ? '导入中...' : '导入书签' }}
+              </button>
               <button
                 class="button button--primary"
                 type="button"
@@ -878,6 +982,8 @@ onMounted(() => {
             </div>
           </header>
           <p v-if="error" class="alert alert--error">{{ error }}</p>
+          <p v-if="importError" class="alert alert--error">{{ importError }}</p>
+          <p v-if="importMessage" class="alert alert--success">{{ importMessage }}</p>
           <div class="table-wrapper">
             <table>
               <thead>
