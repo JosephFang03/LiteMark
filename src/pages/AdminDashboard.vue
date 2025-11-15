@@ -589,6 +589,16 @@ const importMessage = ref('');
 const importError = ref('');
 const importFileInput = ref<HTMLInputElement | null>(null);
 
+// 数据备份相关状态
+const backupExportLoading = ref(false);
+const backupExportMessage = ref('');
+const backupExportError = ref('');
+const backupImportLoading = ref(false);
+const backupImportMessage = ref('');
+const backupImportError = ref('');
+const backupImportFileInput = ref<HTMLInputElement | null>(null);
+const backupImportOverwrite = ref(false);
+
 async function handleImportBookmarks() {
   if (!isAuthenticated.value) {
     showLoginModal.value = true;
@@ -671,6 +681,180 @@ function triggerImportFile() {
     return;
   }
   importFileInput.value?.click();
+}
+
+// 导出数据备份
+async function handleExportBackup() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+
+  backupExportLoading.value = true;
+  backupExportMessage.value = '';
+  backupExportError.value = '';
+
+  try {
+    const response = await requestWithAuth(`${apiBase}/api/backup/export`, {
+      method: 'GET'
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || '导出失败');
+    }
+
+    const data = await response.json();
+
+    // 创建下载链接
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `litemark-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    backupExportMessage.value = '数据导出成功';
+  } catch (err) {
+    backupExportError.value = err instanceof Error ? err.message : '导出失败';
+  } finally {
+    backupExportLoading.value = false;
+  }
+}
+
+// 导入数据备份
+async function handleImportBackup() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+
+  if (!backupImportFileInput.value) {
+    return;
+  }
+
+  const file = backupImportFileInput.value.files?.[0];
+  if (!file) {
+    backupImportError.value = '请选择要导入的备份文件';
+    return;
+  }
+
+  if (!file.name.endsWith('.json')) {
+    backupImportError.value = '请选择 JSON 格式的备份文件';
+    return;
+  }
+
+  backupImportLoading.value = true;
+  backupImportMessage.value = '';
+  backupImportError.value = '';
+
+  try {
+    const fileContent = await file.text();
+    let importData: {
+      bookmarks?: Array<{
+        id?: string;
+        title: string;
+        url: string;
+        category?: string;
+        description?: string;
+        visible?: boolean;
+      }>;
+      settings?: {
+        theme?: string;
+        siteTitle?: string;
+        siteIcon?: string;
+      };
+    };
+
+    try {
+      importData = JSON.parse(fileContent);
+    } catch (parseError) {
+      throw new Error('文件格式错误：无法解析 JSON 内容');
+    }
+
+    if (!importData.bookmarks && !importData.settings) {
+      throw new Error('备份文件格式错误：未找到书签或设置数据');
+    }
+
+    // 如果选择覆盖，需要确认
+    if (backupImportOverwrite.value) {
+      if (!confirm('确定要覆盖现有数据吗？此操作无法撤销！')) {
+        backupImportLoading.value = false;
+        return;
+      }
+    }
+
+    const response = await requestWithAuth(`${apiBase}/api/backup/import`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...importData,
+        overwrite: backupImportOverwrite.value
+      })
+    });
+
+    if (!response.ok) {
+      let errorMessage = '导入失败';
+      try {
+        const errorData = (await response.json()) as { error?: string };
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        errorMessage = await response.text() || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = (await response.json()) as {
+      success: boolean;
+      importedBookmarks: number;
+      updatedSettings: boolean;
+      totalBookmarks: number;
+      errors?: string[];
+    };
+
+    if (result.success) {
+      let message = '';
+      if (result.importedBookmarks > 0) {
+        message += `成功导入 ${result.importedBookmarks} 个书签`;
+      }
+      if (result.updatedSettings) {
+        message += message ? '，设置已更新' : '设置已更新';
+      }
+      if (result.errors && result.errors.length > 0) {
+        message += `，${result.errors.length} 个错误`;
+        console.warn('导入错误:', result.errors);
+      }
+      backupImportMessage.value = message || '导入成功';
+
+      // 重新加载数据
+      await Promise.all([loadBookmarks(), loadSettings()]);
+
+      // 清空文件选择器
+      if (backupImportFileInput.value) {
+        backupImportFileInput.value.value = '';
+      }
+      backupImportOverwrite.value = false;
+    } else {
+      throw new Error('导入失败');
+    }
+  } catch (err) {
+    backupImportError.value = err instanceof Error ? err.message : '导入失败';
+  } finally {
+    backupImportLoading.value = false;
+  }
+}
+
+function triggerBackupImportFile() {
+  if (!isAuthenticated.value) {
+    showLoginModal.value = true;
+    return;
+  }
+  backupImportFileInput.value?.click();
 }
 
 async function persistOrder(list: Bookmark[]) {
@@ -883,6 +1067,68 @@ onMounted(() => {
           <p v-else-if="categoryOrderMessage" class="alert alert--success">
             {{ categoryOrderMessage }}
           </p>
+        </section>
+
+        <section class="card backup-card">
+          <header class="card__header">
+            <div>
+              <h2>数据备份</h2>
+              <p>导出或导入数据备份文件，用于数据迁移和恢复</p>
+            </div>
+          </header>
+          <div class="backup-actions">
+            <div class="backup-export">
+              <h3>导出备份</h3>
+              <p class="backup-description">将当前所有书签和设置导出为 JSON 格式文件</p>
+              <button
+                class="button button--primary"
+                type="button"
+                :disabled="backupExportLoading || !isAuthenticated"
+                @click="handleExportBackup"
+              >
+                {{ backupExportLoading ? '导出中...' : '导出数据' }}
+              </button>
+              <p v-if="backupExportError" class="alert alert--error">{{ backupExportError }}</p>
+              <p v-else-if="backupExportMessage" class="alert alert--success">{{ backupExportMessage }}</p>
+            </div>
+            <div class="backup-import">
+              <h3>导入备份</h3>
+              <p class="backup-description">从 JSON 格式备份文件导入书签和设置</p>
+              <input
+                ref="backupImportFileInput"
+                type="file"
+                accept=".json"
+                style="display: none"
+                @change="handleImportBackup"
+              />
+              <div class="backup-import-options">
+                <label class="field field--toggle">
+                  <span>覆盖现有数据</span>
+                  <div class="toggle">
+                    <input
+                      id="backup-import-overwrite"
+                      v-model="backupImportOverwrite"
+                      type="checkbox"
+                      :disabled="backupImportLoading || !isAuthenticated"
+                    />
+                    <label for="backup-import-overwrite">
+                      {{ backupImportOverwrite ? '是' : '否' }}
+                    </label>
+                  </div>
+                </label>
+              </div>
+              <button
+                class="button button--ghost"
+                type="button"
+                :disabled="backupImportLoading || !isAuthenticated"
+                @click="triggerBackupImportFile"
+              >
+                {{ backupImportLoading ? '导入中...' : '选择文件并导入' }}
+              </button>
+              <p v-if="backupImportError" class="alert alert--error">{{ backupImportError }}</p>
+              <p v-else-if="backupImportMessage" class="alert alert--success">{{ backupImportMessage }}</p>
+            </div>
+          </div>
         </section>
 
         <section class="card settings-card">
@@ -1281,6 +1527,42 @@ onMounted(() => {
   gap: 12px;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.backup-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.backup-export,
+.backup-import {
+  background: var(--surface-card);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: inset 0 0 0 1px var(--surface-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.backup-export h3,
+.backup-import h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.backup-description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.backup-import-options {
+  margin: 8px 0;
 }
 
 .settings-card .form-grid {

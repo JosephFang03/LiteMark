@@ -1,11 +1,15 @@
 {
   "framework": "vite",
   "functions": {
-    "api/**/*.ts": {
+    "vercel/**/*.ts": {
       "runtime": "@vercel/node@3.2.8"
     }
   },
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/vercel/$1"
+    },
     {
       "source": "/((?!api/).*)",
       "destination": "/"

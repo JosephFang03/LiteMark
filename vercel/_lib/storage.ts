@@ -393,3 +393,38 @@ export async function writeJson(key: 'bookmarks' | 'settings', data: unknown) {
   }
 }
 
+// 使用指定驱动写入备份数据
+export async function backupWriteJson(
+  key: 'bookmarks' | 'settings',
+  data: unknown,
+  backupDriver: string
+) {
+  const { bookmarksKey, settingsKey } = getKeys();
+  const resolvedKey = key === 'bookmarks' ? bookmarksKey : settingsKey;
+  const driver = backupDriver.toLowerCase();
+
+  switch (driver) {
+    case 's3':
+      await writeS3Json('s3', resolvedKey, data);
+      break;
+    case 'r2':
+      await writeS3Json('r2', resolvedKey, data);
+      break;
+    case 'oss':
+      await writeAliOssJson(resolvedKey, data);
+      break;
+    case 'cos':
+      await writeCosJson(resolvedKey, data);
+      break;
+    case 'webdav':
+      await writeWebdavJson(resolvedKey, data);
+      break;
+    case 'vercel-blob':
+      await writeVercelBlob(resolvedKey, data);
+      break;
+    default:
+      console.warn(`未知的备份驱动: ${backupDriver}，跳过备份`);
+      break;
+  }
+}
+
