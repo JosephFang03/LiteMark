@@ -1,4 +1,12 @@
-# LiteMark
+
+<p align="center">
+    <a href="https://github.com/topqaz/LiteMark" target="_blank" rel="noopener noreferrer">
+        <img width="100" src="public/LiteMark.png" alt="LiteMark logo" />
+    </a>
+</p>
+<p align="center"><b>LiteMark，</b>轻量易用的书签导航系统</p>
+
+---
 
 LiteMark 是一款基于 **Vue 3 + Vite** 的个人书签管理应用，提供响应式双端体验、后台管理面板以及 Postgres 持久化存储。当前前端和后端（Vercel Functions + Vercel Postgres）已深度集成，只需少量配置即可在本地或 Vercel 上快速运行。
 ---
@@ -6,13 +14,42 @@ LiteMark 是一款基于 **Vue 3 + Vite** 的个人书签管理应用，提供�
 ## 功能亮点
 
 - 📚 **书签管理**：支持添加、编辑、删除、隐藏与排序；分类顺序与分类内顺序均可拖拽调整。
-- 🎨 **主题定制**：内置多套主题，可在后台即时切换；支持自定义站点标题和图标。
-- 🔍 **高效浏览**：搜索框置于顶栏，移动端卡片两列展示并自动适配描述内容。
 - 🔐 **后台面板**：位于 `/admin`，含登录校验、缓存刷新、站点设置等管理动作。
-- 🚀 **极佳体验**：SSR 友好的 API、前端缓存提示、响应式布局与移动端操作优化。
+- 🚀 **极佳体验**：友好的 API、响应式布局与移动端操作优化。
 - 💾 **WebDAV 定时备份**：支持配置 WebDAV 服务器，实现定时自动循环备份（每天/每周/每月）。
 
 ---
+
+## 项目演示
+
+### 主页展示
+
+<p align="center">
+  <img src="project_img/home1.jpg" alt="主页截图1" width="800" />
+</p>
+
+<p align="center">
+  <img src="project_img/home2.jpg" alt="主页截图2" width="800" />
+</p>
+
+### 登录页面
+
+<p align="center">
+  <img src="project_img/login.jpg" alt="登录页面" width="800" />
+</p>
+
+### 管理后台
+
+<p align="center">
+  <img src="project_img/admin1.jpg" alt="管理后台截图1" width="800" />
+</p>
+
+<p align="center">
+  <img src="project_img/admin2.jpg" alt="管理后台截图2" width="800" />
+</p>
+
+---
+
 
 ## 部署到 Vercel
 
@@ -35,7 +72,6 @@ LiteMark 支持将数据定时备份到 WebDAV 服务器，确保数据安全。
      - WebDAV 地址（如：`https://dav.example.com`）
      - 用户名和密码
      - 备份路径（可选，默认为 `litemark-backup/`）
-     - 备份频率（每天/每周/每月）
    - 点击"测试连接"验证配置
    - 点击"保存配置"保存设置
 
