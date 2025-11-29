@@ -15,7 +15,7 @@ LiteMark 是一款基于 **Vue 3 + Vite** 的个人书签管理应用，提供�
 
 ## 部署到 Vercel
 ### 一键部署
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftopqaz%2FLiteMark&env=JWT_SECRET&project-name=litemark&repository-name=litemark)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FJosephFang03%2FLiteMark&env=JWT_SECRET&project-name=litemark&repository-name=litemark)
 
 部署完成后手动创建Neon Serverless Postgres数据库，然后连接到这个项目即可
 ### 手动部署
